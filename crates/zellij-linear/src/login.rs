@@ -54,7 +54,9 @@ pub fn run() -> Result<()> {
 
     eprintln!("Opening browser to authorize zellij-linear…");
     if webbrowser::open(&authorize_url).is_err() {
-        eprintln!("Couldn't open a browser automatically. Visit this URL manually:\n{authorize_url}");
+        eprintln!(
+            "Couldn't open a browser automatically. Visit this URL manually:\n{authorize_url}"
+        );
     } else {
         eprintln!("If nothing opened, visit:\n{authorize_url}");
     }
@@ -80,10 +82,7 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-fn wait_for_callback(
-    listener: &tiny_http::Server,
-    timeout: Duration,
-) -> Result<(String, String)> {
+fn wait_for_callback(listener: &tiny_http::Server, timeout: Duration) -> Result<(String, String)> {
     let deadline = std::time::Instant::now() + timeout;
     loop {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
@@ -103,10 +102,7 @@ fn wait_for_callback(
         let params: HashMap<String, String> = parsed.query_pairs().into_owned().collect();
 
         if let Some(err) = params.get("error") {
-            let desc = params
-                .get("error_description")
-                .cloned()
-                .unwrap_or_default();
+            let desc = params.get("error_description").cloned().unwrap_or_default();
             let body = format!(
                 "<html><body><h2>Authorization failed</h2><p>{err}: {desc}</p></body></html>"
             );

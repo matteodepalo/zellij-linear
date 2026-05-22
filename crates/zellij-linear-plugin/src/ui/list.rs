@@ -3,6 +3,7 @@
 use linear_client::types::Issue;
 
 use crate::state::State;
+use crate::ui::text::truncate;
 
 const KEY_HINT: &str = "[c] claude  [r] refresh  [?] help";
 
@@ -12,7 +13,7 @@ pub fn render(state: &State, rows: usize, cols: usize) {
     let sep = "─".repeat(cols.max(1));
     println!("{sep}");
 
-    let footer_rows = if state.last_error.is_some() || state.status_message.is_some() {
+    let footer_rows = if state.last_error.is_some() || state.current_status().is_some() {
         3 // hint line + status line + bottom separator
     } else {
         2
@@ -54,7 +55,7 @@ pub fn render(state: &State, rows: usize, cols: usize) {
 
     let sep = "─".repeat(cols.max(1));
     println!("{sep}");
-    if let Some(msg) = state.status_message.as_deref() {
+    if let Some(msg) = state.current_status() {
         println!("{}", truncate(msg, cols));
     } else if let Some(err) = state.last_error.as_deref() {
         println!("{}", truncate(err, cols));
@@ -64,12 +65,7 @@ pub fn render(state: &State, rows: usize, cols: usize) {
 
 fn render_issue_rows(state: &State, cols: usize, body_rows: usize) {
     let offset = viewport_offset(state.selected_idx, state.issues.len(), body_rows);
-    let visible = state
-        .issues
-        .iter()
-        .enumerate()
-        .skip(offset)
-        .take(body_rows);
+    let visible = state.issues.iter().enumerate().skip(offset).take(body_rows);
     for (idx, issue) in visible {
         let selected = idx == state.selected_idx;
         let row = format_issue_row(issue, cols, selected);
@@ -89,7 +85,9 @@ fn format_issue_row(issue: &Issue, cols: usize, selected: bool) -> String {
 }
 
 fn priority_icon(priority: f64) -> &'static str {
-    // Linear: 0=no priority, 1=urgent, 2=high, 3=normal, 4=low
+    // Linear returns integral priorities 0..=4 as Float for forward
+    // compatibility; we truncate via `as u8` — anything outside the known
+    // range falls through to the default glyph.
     match priority as u8 {
         1 => "!", // urgent
         2 => "▲", // high
@@ -115,12 +113,7 @@ fn build_header(state: &State, cols: usize) -> String {
         .config
         .as_ref()
         .and_then(|c| c.project_name.clone())
-        .or_else(|| {
-            state
-                .config
-                .as_ref()
-                .and_then(|c| c.project_id.clone())
-        })
+        .or_else(|| state.config.as_ref().and_then(|c| c.project_id.clone()))
         .unwrap_or_else(|| "Linear".to_string());
     let count = if state.initial_load_done {
         format!("{}", state.issues.len())
@@ -129,17 +122,4 @@ fn build_header(state: &State, cols: usize) -> String {
     };
     let line = format!("{name}  ({count})");
     truncate(&line, cols).to_string()
-}
-
-fn truncate(s: &str, cols: usize) -> String {
-    if cols == 0 {
-        return String::new();
-    }
-    let chars: Vec<char> = s.chars().collect();
-    if chars.len() <= cols {
-        s.to_string()
-    } else {
-        let head: String = chars.into_iter().take(cols.saturating_sub(1)).collect();
-        format!("{head}…")
-    }
 }

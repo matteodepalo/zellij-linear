@@ -8,13 +8,15 @@ mod config;
 mod poll;
 mod state;
 mod ui;
+mod util;
 
 use crate::api::{
-    fetch_assigned_issues, parse_issue_response, FetchOptions, ParsedIssues, KIND_FETCH_ISSUES,
-    KIND_GET_TOKEN, KIND_REFRESH_TOKEN,
+    ctx, fetch_assigned_issues, parse_issue_response, FetchOptions, ParsedIssues,
+    KIND_FETCH_ISSUES, KIND_GET_TOKEN, KIND_OPEN_URL, KIND_REFRESH_TOKEN,
 };
 use crate::bridge::{render_prompt, send_or_copy, SendOutcome, DEFAULT_PROMPT_TEMPLATE};
 use crate::state::{State, View, MAX_CONSECUTIVE_AUTH_FAILURES};
+use crate::util::iso8601_now;
 
 register_plugin!(State);
 
@@ -30,7 +32,6 @@ const REQUIRED_PERMISSIONS: &[PermissionType] = &[
 const SUBSCRIBED_EVENTS: &[EventType] = &[
     EventType::Key,
     EventType::PaneUpdate,
-    EventType::TabUpdate,
     EventType::WebRequestResult,
     EventType::RunCommandResult,
     EventType::PermissionRequestResult,
@@ -58,7 +59,6 @@ impl ZellijPlugin for State {
             Event::PermissionRequestResult(status) => self.on_permissions(status),
             Event::Key(key) => self.on_key(key),
             Event::PaneUpdate(manifest) => self.on_panes(manifest),
-            Event::TabUpdate(_) => false,
             Event::WebRequestResult(status, _headers, body, context) => {
                 self.on_web(status, body, context)
             }
@@ -75,6 +75,7 @@ impl ZellijPlugin for State {
     }
 
     fn render(&mut self, rows: usize, cols: usize) {
+        self.prune_expired_status();
         ui::render(self, rows, cols);
     }
 }
@@ -137,19 +138,13 @@ impl State {
     }
 
     fn kick_off_initial_fetch_or_retry(&mut self, kind: &str) {
-        match kind {
-            KIND_GET_TOKEN => {
-                if self.can_fetch() {
-                    self.dispatch_fetch();
-                }
-                self.schedule_next_poll();
-            }
-            KIND_REFRESH_TOKEN => {
-                if self.can_fetch() {
-                    self.dispatch_fetch();
-                }
-            }
-            _ => {}
+        if self.can_fetch() {
+            self.dispatch_fetch();
+        }
+        // Only the bootstrap path needs to arm the recurring timer; refresh
+        // happens inside an already-scheduled poll.
+        if kind == KIND_GET_TOKEN {
+            self.schedule_next_poll();
         }
     }
 
@@ -178,7 +173,7 @@ impl State {
             self.poll.last_updated_at.clone()
         };
         let req_id = self.next_req_id();
-        self.poll.in_flight = true;
+        self.poll.mark_dispatched(req_id.clone());
         fetch_assigned_issues(FetchOptions {
             access_token: &token,
             project_id: project_id.as_deref(),
@@ -189,22 +184,35 @@ impl State {
     }
 
     fn on_web(&mut self, status: u16, body: Vec<u8>, context: BTreeMap<String, String>) -> bool {
-        let kind = context.get("kind").cloned().unwrap_or_default();
+        let kind = context.get(ctx::KIND).map(String::as_str).unwrap_or("");
         if kind != KIND_FETCH_ISSUES {
             return false;
         }
-        self.poll.in_flight = false;
+        let req_id = context.get(ctx::REQ_ID).cloned().unwrap_or_default();
+        if self.poll.in_flight_req_id.as_ref() != Some(&req_id) {
+            // Stale response (likely from a request we already timed out
+            // and retried). Drop it.
+            return false;
+        }
+        let full = context.get(ctx::FULL).map(String::as_str) == Some("true");
+        self.poll.clear_in_flight();
         match parse_issue_response(status, &body) {
             ParsedIssues::Ok(new_issues) => {
-                self.merge_issues(new_issues);
+                let was_empty_full = full && new_issues.is_empty();
+                self.merge_issues(new_issues, full);
                 self.initial_load_done = true;
                 self.poll.poll_count = self.poll.poll_count.saturating_add(1);
                 self.last_error = None;
                 self.consecutive_auth_failures = 0;
+                // Empty full refresh: anchor the cursor to "now" so
+                // subsequent polls run as deltas instead of perpetual
+                // full refreshes.
+                if was_empty_full && self.poll.last_updated_at.is_none() {
+                    self.poll.last_updated_at = Some(iso8601_now());
+                }
             }
             ParsedIssues::Unauthorized => {
-                self.consecutive_auth_failures =
-                    self.consecutive_auth_failures.saturating_add(1);
+                self.consecutive_auth_failures = self.consecutive_auth_failures.saturating_add(1);
                 if self.consecutive_auth_failures > MAX_CONSECUTIVE_AUTH_FAILURES {
                     self.last_error = Some(
                         "Authentication failed repeatedly. Run `zellij-linear login` again."
@@ -222,11 +230,14 @@ impl State {
         true
     }
 
-    fn merge_issues(&mut self, incoming: Vec<linear_client::types::Issue>) {
-        if self.poll.should_full_refresh() || self.issues.is_empty() {
+    fn merge_issues(&mut self, incoming: Vec<linear_client::types::Issue>, full: bool) {
+        if full || self.issues.is_empty() {
             self.issues = incoming;
         } else {
-            // Delta: replace matching ids, prepend new ones.
+            // Delta: replace matching ids, prepend new ones. Note: this
+            // leaves issues that transitioned *out* of the filter set
+            // (e.g. moved to `completed`) in place until the next full
+            // refresh (every 5th poll).
             for inc in incoming {
                 if let Some(slot) = self.issues.iter_mut().find(|i| i.id == inc.id) {
                     *slot = inc;
@@ -245,7 +256,12 @@ impl State {
     }
 
     fn on_timer(&mut self) -> bool {
-        if self.can_fetch() && !self.poll.in_flight {
+        self.prune_expired_status();
+        // Stale in-flight request? Clear it so we can retry.
+        if self.poll.in_flight_timed_out() {
+            self.poll.clear_in_flight();
+        }
+        if self.can_fetch() && !self.poll.is_in_flight() {
             self.dispatch_fetch();
         }
         self.schedule_next_poll();
@@ -264,17 +280,16 @@ impl State {
     fn on_key(&mut self, key: KeyWithModifier) -> bool {
         // Ignore key chords with Ctrl/Alt/Super so the plugin doesn't
         // accidentally trigger on `Ctrl+C`, `Alt+R`, etc.
-        if key.key_modifiers.iter().any(|m| {
-            matches!(
-                m,
-                KeyModifier::Ctrl | KeyModifier::Alt | KeyModifier::Super
-            )
-        }) {
+        if key
+            .key_modifiers
+            .iter()
+            .any(|m| matches!(m, KeyModifier::Ctrl | KeyModifier::Alt | KeyModifier::Super))
+        {
             return false;
         }
 
         // Any keypress invalidates a stale transient status message.
-        self.status_message = None;
+        self.clear_status();
 
         match key.bare_key {
             BareKey::Char('j') | BareKey::Down => {
@@ -295,10 +310,10 @@ impl State {
             }
             BareKey::Char('r') => {
                 self.poll.enter_burst();
-                if self.can_fetch() && !self.poll.in_flight {
+                if self.can_fetch() && !self.poll.is_in_flight() {
                     self.dispatch_fetch();
                 }
-                self.status_message = Some("Refreshing…".to_string());
+                self.set_status("Refreshing…");
                 true
             }
             // Zellij delivers capital letters as Char('C')/Char('Y')
@@ -315,7 +330,7 @@ impl State {
                 if let Some(issue) = self.selected_issue() {
                     let body = issue.description.clone().unwrap_or_default();
                     copy_to_clipboard(body);
-                    self.status_message = Some("Copied issue body".to_string());
+                    self.set_status("Copied issue body");
                 }
                 true
             }
@@ -328,21 +343,23 @@ impl State {
                         .unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string());
                     let prompt = render_prompt(issue, &template);
                     copy_to_clipboard(prompt);
-                    self.status_message = Some("Copied formatted prompt".to_string());
+                    self.set_status("Copied formatted prompt");
                 }
                 true
             }
             BareKey::Char('o') => {
                 if let Some(issue) = self.selected_issue() {
-                    let mut ctx = BTreeMap::new();
-                    ctx.insert("kind".to_string(), "open_url".to_string());
+                    let mut cmd_ctx = BTreeMap::new();
+                    cmd_ctx.insert(ctx::KIND.to_string(), KIND_OPEN_URL.to_string());
                     let opener = if cfg!(target_os = "macos") {
                         "open"
                     } else {
                         "xdg-open"
                     };
-                    run_command(&[opener, &issue.url], ctx);
-                    self.status_message = Some(format!("Opening {}", issue.identifier));
+                    let url = issue.url.clone();
+                    let identifier = issue.identifier.clone();
+                    run_command(&[opener, &url], cmd_ctx);
+                    self.set_status(&format!("Opening {identifier}"));
                 }
                 true
             }
@@ -388,11 +405,11 @@ impl State {
         let prompt = render_prompt(&issue, &template);
         match send_or_copy(&self.panes, &target, prompt, auto_submit) {
             SendOutcome::Sent => {
-                self.status_message = Some(format!("Sent {} to Claude", issue.identifier));
+                self.set_status(&format!("Sent {} to Claude", issue.identifier));
                 self.poll.enter_burst();
             }
             SendOutcome::Copied => {
-                self.status_message = Some(format!(
+                self.set_status(&format!(
                     "No `{target}` pane — copied prompt for {}",
                     issue.identifier
                 ));

@@ -1,5 +1,6 @@
 pub mod help;
 pub mod list;
+pub mod text;
 
 use crate::state::{State, View};
 

@@ -1,6 +1,10 @@
 //! `zellij-linear token` — print the current access token to stdout,
 //! refreshing first when within 5 minutes of expiry. The wasm plugin
 //! shells out to this on bootstrap and on 401s.
+//!
+//! **stdout discipline**: the plugin consumes stdout verbatim as the
+//! access token. Never `println!` anything else from this command —
+//! status messages, refresh notices, etc. must go to stderr.
 
 use anyhow::{Context, Result};
 use linear_client::auth::{auth_from_token, load, refresh, save};

@@ -51,11 +51,33 @@ pub enum AuthError {
 
 /// Absolute path of the persisted auth file. The directory is created
 /// on first save; reads tolerate the file being absent.
+///
+/// * Unix:    `$HOME/.config/zellij-linear/auth.json`
+/// * Windows: `%APPDATA%\zellij-linear\auth.json`
 pub fn auth_file_path() -> PathBuf {
-    let home = std::env::var_os("HOME")
+    config_dir().join("auth.json")
+}
+
+#[cfg(unix)]
+fn config_dir() -> PathBuf {
+    std::env::var_os("HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    home.join(".config/zellij-linear/auth.json")
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".config")
+        .join("zellij-linear")
+}
+
+#[cfg(windows)]
+fn config_dir() -> PathBuf {
+    std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("zellij-linear")
+}
+
+#[cfg(not(any(unix, windows)))]
+fn config_dir() -> PathBuf {
+    PathBuf::from(".zellij-linear")
 }
 
 pub fn load() -> Result<AuthFile, AuthError> {

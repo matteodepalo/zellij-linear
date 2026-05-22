@@ -44,10 +44,7 @@ pub struct ClaudeConfig {
 
 impl ProjectConfig {
     pub fn target_command(&self) -> &str {
-        self.claude
-            .target_command
-            .as_deref()
-            .unwrap_or("claude")
+        self.claude.target_command.as_deref().unwrap_or("claude")
     }
 
     pub fn state_types(&self) -> Vec<String> {

@@ -1,4 +1,6 @@
-pub fn render(_rows: usize, _cols: usize) {
+use crate::ui::text::truncate;
+
+pub fn render(_rows: usize, cols: usize) {
     let lines = [
         "zellij-linear — keybinds",
         "",
@@ -7,7 +9,7 @@ pub fn render(_rows: usize, _cols: usize) {
         "  g       jump to top",
         "  G       jump to bottom",
         "  r       refresh now",
-        "  c       send to Claude (paste only)",
+        "  c       send to Claude (paste)",
         "  C       send to Claude + submit",
         "  y       copy issue body",
         "  Y       copy formatted prompt",
@@ -16,6 +18,6 @@ pub fn render(_rows: usize, _cols: usize) {
         "  Esc     back / hide plugin",
     ];
     for line in lines {
-        println!("{line}");
+        println!("{}", truncate(line, cols));
     }
 }

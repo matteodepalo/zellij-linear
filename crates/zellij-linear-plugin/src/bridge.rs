@@ -52,7 +52,7 @@ pub fn find_claude_pane(
         .find_map(|p| {
             let cmd = p.terminal_command.as_deref()?;
             cmd.contains(target_substring)
-                .then(|| PaneId::Terminal(p.id))
+                .then_some(PaneId::Terminal(p.id))
         })
 }
 
@@ -87,5 +87,123 @@ pub fn send_or_copy(
             copy_to_clipboard(prompt);
             SendOutcome::Copied
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use linear_client::types::{Issue, IssueState, Label, LabelConnection};
+
+    fn sample_issue() -> Issue {
+        Issue {
+            id: "abc".into(),
+            identifier: "ENG-1".into(),
+            title: "Fix login".into(),
+            description: Some("It crashes on Safari.".into()),
+            priority: 2.0,
+            state: IssueState {
+                name: "In Progress".into(),
+                state_type: "started".into(),
+                color: "#ff0000".into(),
+            },
+            labels: LabelConnection {
+                nodes: vec![
+                    Label {
+                        name: "bug".into(),
+                        color: "#ff0000".into(),
+                    },
+                    Label {
+                        name: "auth".into(),
+                        color: "#00ff00".into(),
+                    },
+                ],
+            },
+            url: "https://linear.app/x/issue/ENG-1".into(),
+            updated_at: "2026-05-22T00:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn render_prompt_substitutes_placeholders() {
+        let issue = sample_issue();
+        let out = render_prompt(&issue, DEFAULT_PROMPT_TEMPLATE);
+        assert!(out.contains("ENG-1"));
+        assert!(out.contains("Fix login"));
+        assert!(out.contains("It crashes on Safari."));
+        assert!(out.contains("- bug"));
+        assert!(out.contains("- auth"));
+        assert!(out.contains("https://linear.app/x/issue/ENG-1"));
+    }
+
+    #[test]
+    fn render_prompt_handles_missing_description() {
+        let mut issue = sample_issue();
+        issue.description = None;
+        let out = render_prompt(&issue, DEFAULT_PROMPT_TEMPLATE);
+        assert!(out.contains("(no description)"));
+    }
+
+    #[test]
+    fn render_prompt_handles_empty_labels() {
+        let mut issue = sample_issue();
+        issue.labels.nodes.clear();
+        let out = render_prompt(&issue, DEFAULT_PROMPT_TEMPLATE);
+        assert!(out.contains("(no labels)"));
+    }
+
+    #[test]
+    fn render_prompt_supports_custom_template() {
+        let issue = sample_issue();
+        let out = render_prompt(&issue, "Work on {identifier}: {title}");
+        assert_eq!(out, "Work on ENG-1: Fix login");
+    }
+
+    fn pane(id: u32, command: Option<&str>, is_plugin: bool) -> PaneInfo {
+        PaneInfo {
+            id,
+            terminal_command: command.map(str::to_string),
+            is_plugin,
+            ..PaneInfo::default()
+        }
+    }
+
+    #[test]
+    fn find_claude_pane_matches_substring() {
+        let mut panes = BTreeMap::new();
+        panes.insert(
+            0,
+            vec![
+                pane(7, Some("bash"), false),
+                pane(8, Some("claude --resume"), false),
+            ],
+        );
+        let found = find_claude_pane(&panes, "claude");
+        assert_eq!(found, Some(PaneId::Terminal(8)));
+    }
+
+    #[test]
+    fn find_claude_pane_excludes_plugin_panes() {
+        let mut panes = BTreeMap::new();
+        panes.insert(0, vec![pane(1, Some("claude"), true)]);
+        assert!(find_claude_pane(&panes, "claude").is_none());
+    }
+
+    #[test]
+    fn find_claude_pane_returns_none_when_no_match() {
+        let mut panes = BTreeMap::new();
+        panes.insert(0, vec![pane(1, Some("vim"), false), pane(2, None, false)]);
+        assert!(find_claude_pane(&panes, "claude").is_none());
+    }
+
+    #[test]
+    fn find_claude_pane_searches_across_tabs() {
+        let mut panes = BTreeMap::new();
+        panes.insert(0, vec![pane(1, Some("bash"), false)]);
+        panes.insert(1, vec![pane(2, Some("claude code"), false)]);
+        assert_eq!(
+            find_claude_pane(&panes, "claude"),
+            Some(PaneId::Terminal(2))
+        );
     }
 }

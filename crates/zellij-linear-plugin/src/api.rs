@@ -18,6 +18,16 @@ pub const KIND_FETCH_ISSUES: &str = "fetch_issues";
 pub const KIND_GET_TOKEN: &str = "get_token";
 /// Tag attached to the token re-fetch after a 401.
 pub const KIND_REFRESH_TOKEN: &str = "refresh_token";
+/// Tag attached to `open` / `xdg-open` invocations.
+pub const KIND_OPEN_URL: &str = "open_url";
+
+/// Context keys we attach to requests so responses can be routed.
+pub mod ctx {
+    pub const KIND: &str = "kind";
+    pub const REQ_ID: &str = "req_id";
+    /// `"true"` if the request is a full refresh, `"false"` for a delta.
+    pub const FULL: &str = "full";
+}
 
 pub struct FetchOptions<'a> {
     pub access_token: &'a str,
@@ -31,6 +41,7 @@ pub struct FetchOptions<'a> {
 }
 
 pub fn fetch_assigned_issues(opts: FetchOptions<'_>) {
+    let full = opts.since.is_none();
     let (query, variables) = match opts.since {
         Some(since) => (
             Q_ASSIGNED_ISSUES_DELTA,
@@ -59,8 +70,9 @@ pub fn fetch_assigned_issues(opts: FetchOptions<'_>) {
     headers.insert("Content-Type".to_string(), "application/json".to_string());
 
     let mut context = BTreeMap::new();
-    context.insert("kind".to_string(), KIND_FETCH_ISSUES.to_string());
-    context.insert("req_id".to_string(), opts.req_id.to_string());
+    context.insert(ctx::KIND.to_string(), KIND_FETCH_ISSUES.to_string());
+    context.insert(ctx::REQ_ID.to_string(), opts.req_id.to_string());
+    context.insert(ctx::FULL.to_string(), full.to_string());
 
     web_request(LINEAR_GRAPHQL, HttpVerb::Post, headers, body_bytes, context);
 }
@@ -80,7 +92,11 @@ pub fn parse_issue_response(status: u16, body: &[u8]) -> ParsedIssues {
         return ParsedIssues::Unauthorized;
     }
     if !(200..300).contains(&status) {
-        let snippet = std::str::from_utf8(body).unwrap_or("").chars().take(200).collect::<String>();
+        let snippet = std::str::from_utf8(body)
+            .unwrap_or("")
+            .chars()
+            .take(200)
+            .collect::<String>();
         return ParsedIssues::Error(format!("HTTP {status}: {snippet}"));
     }
     let parsed: GraphQLResponse<ViewerWrapper<AssignedIssues>> = match serde_json::from_slice(body)
@@ -103,4 +119,68 @@ pub fn parse_issue_response(status: u16, body: &[u8]) -> ParsedIssues {
         .map(|d| d.viewer.assigned_issues.nodes)
         .unwrap_or_default();
     ParsedIssues::Ok(issues)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_401_as_unauthorized() {
+        match parse_issue_response(401, b"{}") {
+            ParsedIssues::Unauthorized => {}
+            other => panic!(
+                "expected Unauthorized, got {:?}",
+                std::mem::discriminant(&other)
+            ),
+        }
+    }
+
+    #[test]
+    fn surfaces_non_success_with_snippet() {
+        match parse_issue_response(500, b"server boom") {
+            ParsedIssues::Error(msg) => assert!(msg.contains("500"), "msg = {msg}"),
+            _ => panic!("expected Error"),
+        }
+    }
+
+    #[test]
+    fn surfaces_graphql_errors() {
+        let body = br#"{"data":null,"errors":[{"message":"invalid filter"}]}"#;
+        match parse_issue_response(200, body) {
+            ParsedIssues::Error(msg) => assert!(msg.contains("invalid filter")),
+            _ => panic!("expected Error"),
+        }
+    }
+
+    #[test]
+    fn parses_empty_node_list() {
+        let body = br#"{"data":{"viewer":{"assignedIssues":{"nodes":[]}}}}"#;
+        match parse_issue_response(200, body) {
+            ParsedIssues::Ok(issues) => assert!(issues.is_empty()),
+            _ => panic!("expected Ok"),
+        }
+    }
+
+    #[test]
+    fn parses_one_issue() {
+        // Double `##` delimiters so the embedded `#` in `#f00` doesn't
+        // close the raw string.
+        let body = br##"{
+            "data":{"viewer":{"assignedIssues":{"nodes":[{
+                "id":"abc","identifier":"ENG-1","title":"Hi","description":null,
+                "priority":2.0,"url":"https://linear.app/x","updatedAt":"2026-05-22T00:00:00Z",
+                "state":{"name":"In Progress","type":"started","color":"#f00"},
+                "labels":{"nodes":[]}
+            }]}}}
+        }"##;
+        match parse_issue_response(200, body) {
+            ParsedIssues::Ok(issues) => {
+                assert_eq!(issues.len(), 1);
+                assert_eq!(issues[0].identifier, "ENG-1");
+                assert_eq!(issues[0].state.state_type, "started");
+            }
+            _ => panic!("expected Ok"),
+        }
+    }
 }

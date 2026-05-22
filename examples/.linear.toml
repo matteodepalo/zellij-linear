@@ -6,6 +6,8 @@
 # corresponds to by EITHER `project_id` (UUID, stable) OR
 # `project_name` (resolved on first run).
 
+# REPLACE_ME: paste the project UUID from Linear (visible in the URL when
+# you open the project in your browser, or via the GraphQL API).
 project_id = "00000000-0000-0000-0000-000000000000"
 # project_name = "Mobile app v2"
 # team = "ENG"   # optional; narrows future per-team queries

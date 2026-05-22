@@ -16,3 +16,4 @@ serde_json.workspace = true
 
 zellij-tile = "0.44"
 toml = "0.9"
+unicode-width = "0.2"

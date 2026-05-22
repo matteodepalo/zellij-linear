@@ -7,6 +7,10 @@ use zellij_tile::prelude::PaneInfo;
 
 use crate::config::ProjectConfig;
 use crate::poll::PollState;
+use crate::util::now_unix;
+
+/// Transient status messages auto-clear this many seconds after being set.
+pub const STATUS_TTL_SECS: u64 = 5;
 
 #[derive(Default)]
 pub struct State {
@@ -31,8 +35,10 @@ pub struct State {
     /// Sticky error surfaced in the footer (auth missing, GraphQL error,
     /// rate-limited, etc.).
     pub last_error: Option<String>,
-    /// Transient status (e.g. "Sent ENG-142 to Claude").
-    pub status_message: Option<String>,
+    /// Transient status (e.g. "Sent ENG-142 to Claude"). The `u64` is the
+    /// unix-seconds expiry; access via [`State::current_status`] which
+    /// hides expired entries.
+    pub status_message: Option<(String, u64)>,
 
     /// Monotonic counter used to tag `web_request` and `run_command`
     /// invocations so the result can be matched.
@@ -74,5 +80,34 @@ impl State {
         let len = self.issues.len() as isize;
         let new = (self.selected_idx as isize + delta).clamp(0, len - 1);
         self.selected_idx = new as usize;
+    }
+
+    /// Set a transient status that will auto-clear after
+    /// [`STATUS_TTL_SECS`] seconds.
+    pub fn set_status(&mut self, msg: &str) {
+        let expiry = now_unix().saturating_add(STATUS_TTL_SECS);
+        self.status_message = Some((msg.to_string(), expiry));
+    }
+
+    pub fn clear_status(&mut self) {
+        self.status_message = None;
+    }
+
+    /// Drop the status message if it's past its expiry. Call at the top
+    /// of `render` and `on_timer`.
+    pub fn prune_expired_status(&mut self) {
+        if let Some((_, expiry)) = &self.status_message {
+            if *expiry <= now_unix() {
+                self.status_message = None;
+            }
+        }
+    }
+
+    /// `Some(msg)` if a status is set and not yet expired.
+    pub fn current_status(&self) -> Option<&str> {
+        match &self.status_message {
+            Some((msg, expiry)) if *expiry > now_unix() => Some(msg.as_str()),
+            _ => None,
+        }
     }
 }

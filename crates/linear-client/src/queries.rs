@@ -77,8 +77,9 @@ query AssignedIssuesDelta(
 }
 "#;
 
-/// Single issue with comments — used for detail view (v0.1 renders
-/// in-place; v0.2 will float).
+/// Single issue with comments — reserved for the v0.2 detail view; the
+/// plugin doesn't invoke this yet.
+#[allow(dead_code)]
 pub const Q_ISSUE_DETAIL: &str = r#"
 query IssueDetail($id: String!) {
   issue(id: $id) {
