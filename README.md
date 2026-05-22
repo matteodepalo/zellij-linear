@@ -49,18 +49,31 @@ plugin from the Claude store — it composes well with this sidebar.
 
 ## Install
 
+The quick path is the bundled `install.sh`. It builds the wasm plugin,
+installs the CLI, copies the wasm into Zellij's plugins directory, and
+symlinks the sidebar layout — all idempotent.
+
 ```bash
 git clone https://github.com/matteodepalo/zellij-linear
 cd zellij-linear
+./install.sh
+```
 
-# Build + install the native CLI to ~/.cargo/bin/zellij-linear
+If you'd rather drive each step yourself:
+
+```bash
+# Native CLI → ~/.cargo/bin/zellij-linear
 cargo install --locked --path crates/zellij-linear
 
-# Build + install the wasm plugin into Zellij's plugins directory
+# Wasm plugin → ~/.config/zellij/plugins/zellij-linear.wasm
 cargo build --locked --release --target wasm32-wasip1 -p zellij-linear-plugin
 mkdir -p ~/.config/zellij/plugins
 cp target/wasm32-wasip1/release/zellij-linear-plugin.wasm \
    ~/.config/zellij/plugins/zellij-linear.wasm
+
+# Layout → ~/.config/zellij/layouts/zellij-linear.kdl
+mkdir -p ~/.config/zellij/layouts
+ln -sf "$(pwd)/examples/layout.kdl" ~/.config/zellij/layouts/zellij-linear.kdl
 ```
 
 Verify:
@@ -68,6 +81,7 @@ Verify:
 ```bash
 zellij-linear --help
 ls ~/.config/zellij/plugins/zellij-linear.wasm
+ls ~/.config/zellij/layouts/zellij-linear.kdl
 ```
 
 ## First-time setup
@@ -120,17 +134,25 @@ schema (state filters, Claude target command, prompt template).
 
 ## Launching
 
+`install.sh` already symlinked the layout into Zellij's layout directory,
+so you can refer to it by name from anywhere:
+
 ```bash
 cd ~/code/my-project
-zellij --layout /path/to/zellij-linear/examples/layout.kdl
+zellij --layout zellij-linear
 ```
 
 The layout puts your work pane on the left (75 %) and the sidebar on the
 right (25 %). On first run, Zellij prompts to grant the plugin's
 permissions — approve once, the grant is cached.
 
-If you'd rather load the plugin into an existing layout, drop this into
-its KDL:
+If you skipped `install.sh`, point at the file directly:
+
+```bash
+zellij --layout /path/to/zellij-linear/examples/layout.kdl
+```
+
+Or load the plugin into your own KDL:
 
 ```kdl
 pane size="25%" {
