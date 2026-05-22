@@ -54,19 +54,30 @@ cp target/wasm32-wasip1/release/zellij-linear-plugin.wasm \
 cp target/release/zellij-linear /usr/local/bin/
 ```
 
-### 3. (Optional) Register your own Linear OAuth application
+### 3. Register a Linear OAuth application
 
-The repo ships with a `LINEAR_CLIENT_ID` registered for the public
-`zellij-plugin` application — `zellij-linear login` will work out of
-the box against that. If you want to run against your own app instead
-(e.g. for branding or scope tweaks):
+zellij-linear doesn't ship a baked-in OAuth client — every user
+registers their own. Linear's OAuth apps are workspace-scoped and
+free to create:
 
-1. Open <https://linear.app/settings/api/applications> and create a new
-   application.
-2. Add a redirect URI of `http://localhost:54173/cb` (matching
-   `LINEAR_OAUTH_CALLBACK_PORT` in `crates/linear-client/src/lib.rs`).
-   PKCE means no client secret is needed.
-3. Copy your client ID into `LINEAR_CLIENT_ID` and rebuild the CLI.
+1. Open <https://linear.app/settings/api/applications> and create a
+   new application. PKCE means no client secret is needed.
+2. Set **Redirect URI** to `http://localhost:54173/cb`. (Pick another
+   port if 54173 is taken on your machine and pass `--callback-port`
+   in step 3.)
+3. Copy the resulting **client ID** and run:
+
+   ```bash
+   zellij-linear configure --client-id <YOUR_CLIENT_ID>
+   # or, if you used a different port:
+   # zellij-linear configure --client-id <ID> --callback-port 12345
+   ```
+
+   This writes `~/.config/zellij-linear/config.toml`.
+
+You can also pass the client ID via the `ZELLIJ_LINEAR_CLIENT_ID`
+environment variable (and `ZELLIJ_LINEAR_CALLBACK_PORT` for the
+port) — useful in CI or transient shells.
 
 ### 4. Log in
 

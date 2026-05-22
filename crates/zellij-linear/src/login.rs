@@ -7,36 +7,35 @@ use anyhow::{anyhow, bail, Context, Result};
 use linear_client::auth::{auth_from_token, exchange_code, save, AuthFile};
 use linear_client::http::{HttpClient, HttpResponse, HttpVerb};
 use linear_client::types::{GraphQLResponse, Viewer, ViewerWrapper};
-use linear_client::{
-    queries::Q_VIEWER, DEFAULT_SCOPES, LINEAR_CLIENT_ID, LINEAR_GRAPHQL, LINEAR_OAUTH_AUTHORIZE,
-    LINEAR_OAUTH_CALLBACK_PORT,
-};
+use linear_client::{queries::Q_VIEWER, DEFAULT_SCOPES, LINEAR_GRAPHQL, LINEAR_OAUTH_AUTHORIZE};
 use url::Url;
 
+use crate::config;
 use crate::http_impl::ReqwestClient;
 use crate::pkce::{challenge_from_verifier, generate_state, generate_verifier};
 
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub fn run() -> Result<()> {
+    let cfg = config::load()?;
     let verifier = generate_verifier();
     let challenge = challenge_from_verifier(&verifier);
     let csrf_state = generate_state();
 
-    let bind_addr = format!("127.0.0.1:{LINEAR_OAUTH_CALLBACK_PORT}");
+    let bind_addr = format!("127.0.0.1:{}", cfg.callback_port);
     let listener = tiny_http::Server::http(bind_addr.as_str()).map_err(|e| {
         anyhow!(
             "could not bind {bind_addr} for the OAuth callback ({e}). \
              Another process is likely using that port — close it and retry."
         )
     })?;
-    let redirect_uri = format!("http://localhost:{LINEAR_OAUTH_CALLBACK_PORT}/cb");
+    let redirect_uri = format!("http://localhost:{}/cb", cfg.callback_port);
 
     let mut authorize = Url::parse(LINEAR_OAUTH_AUTHORIZE)?;
     authorize
         .query_pairs_mut()
         .append_pair("response_type", "code")
-        .append_pair("client_id", LINEAR_CLIENT_ID)
+        .append_pair("client_id", &cfg.client_id)
         .append_pair("redirect_uri", &redirect_uri)
         .append_pair("scope", DEFAULT_SCOPES)
         .append_pair("code_challenge", &challenge)
@@ -60,7 +59,7 @@ pub fn run() -> Result<()> {
     }
 
     let http = ReqwestClient::new().context("constructing HTTP client")?;
-    let token = exchange_code(&http, &code, &verifier, &redirect_uri)
+    let token = exchange_code(&http, &cfg.client_id, &code, &verifier, &redirect_uri)
         .context("exchanging authorization code for tokens")?;
     let viewer = fetch_viewer(&http, &token.access_token).context("fetching authenticated user")?;
     let auth: AuthFile = auth_from_token(token, viewer.id, viewer.email);

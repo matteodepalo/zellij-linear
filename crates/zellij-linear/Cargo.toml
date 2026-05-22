@@ -11,12 +11,14 @@ path = "src/main.rs"
 
 [dependencies]
 linear-client = { path = "../linear-client" }
+serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 url.workspace = true
 
 clap = { version = "4", features = ["derive"] }
 reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"], default-features = false }
+toml = "0.9"
 tiny_http = "0.12"
 sha2 = "0.10"
 base64 = "0.22"

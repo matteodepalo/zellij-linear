@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::http::{HttpClient, HttpError, HttpResponse, HttpVerb};
-use crate::{LINEAR_CLIENT_ID, LINEAR_OAUTH_TOKEN};
+use crate::LINEAR_OAUTH_TOKEN;
 
 /// Persisted OAuth state. Forward-compatible: unknown fields are dropped
 /// on read and rewritten without them.
@@ -130,13 +130,14 @@ pub struct TokenResponse {
 /// Exchange an authorization code for tokens (used by `login`).
 pub fn exchange_code(
     http: &dyn HttpClient,
+    client_id: &str,
     code: &str,
     code_verifier: &str,
     redirect_uri: &str,
 ) -> Result<TokenResponse, AuthError> {
     let body = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("grant_type", "authorization_code")
-        .append_pair("client_id", LINEAR_CLIENT_ID)
+        .append_pair("client_id", client_id)
         .append_pair("code", code)
         .append_pair("redirect_uri", redirect_uri)
         .append_pair("code_verifier", code_verifier)
@@ -145,10 +146,14 @@ pub fn exchange_code(
 }
 
 /// Refresh tokens via `grant_type=refresh_token`.
-pub fn refresh(http: &dyn HttpClient, refresh_token: &str) -> Result<TokenResponse, AuthError> {
+pub fn refresh(
+    http: &dyn HttpClient,
+    client_id: &str,
+    refresh_token: &str,
+) -> Result<TokenResponse, AuthError> {
     let body = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("grant_type", "refresh_token")
-        .append_pair("client_id", LINEAR_CLIENT_ID)
+        .append_pair("client_id", client_id)
         .append_pair("refresh_token", refresh_token)
         .finish();
     post_token(http, body.as_bytes())
