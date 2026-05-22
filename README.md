@@ -161,10 +161,11 @@ right (25 %). If you skipped `install.sh`, point at the file directly:
 zellij --layout /path/to/zellij-linear/examples/layout.kdl
 ```
 
-Or load the plugin into your own KDL:
+Or load the plugin into your own KDL — note the `focus=true` so the
+first-run permission dialog receives your `y` keypress:
 
 ```kdl
-pane size="25%" {
+pane size="25%" focus=true {
     plugin location="file:~/.config/zellij/plugins/zellij-linear.wasm"
 }
 ```
@@ -172,12 +173,33 @@ pane size="25%" {
 ### First-run permission prompt
 
 The first time a fresh wasm is loaded, Zellij shows a permission dialog
-in the plugin pane asking you to approve the capabilities it requested.
-The dialog can be hidden if the focus is somewhere else — if the
-sidebar looks blank on first launch, press `Ctrl+P` then `→` (or
-`Alt+→`) to move focus into the plugin pane. Approve with `y`. Zellij
-caches the grant; subsequent launches go straight to the sidebar
-without prompting.
+in the plugin pane. Approve with `y`; Zellij caches the grant in
+`~/Library/Caches/org.Zellij-Contributors.Zellij/permissions.kdl`
+(macOS) so subsequent launches go straight to the sidebar.
+
+**If the pane looks blank on first launch**, that's
+[Zellij #4749](https://github.com/zellij-org/zellij/issues/4749) —
+the host's permission prompt overflows in narrow tiled panes and
+appears invisible. Two workarounds:
+
+1. The bundled layout has `focus=true` on the plugin pane, so you can
+   simply press `y` once — even if the prompt text isn't visible, the
+   keypress is routed to Zellij's dialog and the grant goes through.
+   Verify by re-launching: the sidebar should now render normally.
+2. Pre-grant by manually writing the cache file (one-time setup):
+   ```bash
+   cat >> ~/Library/Caches/org.Zellij-Contributors.Zellij/permissions.kdl <<'EOF'
+   "$HOME/.config/zellij/plugins/zellij-linear.wasm" {
+       ReadApplicationState
+       RunCommands
+       WebAccess
+       ChangeApplicationState
+       WriteToStdin
+       WriteToClipboard
+   }
+   EOF
+   ```
+   (Linux equivalent path: `~/.cache/zellij/permissions.kdl`.)
 
 zellij-linear requests these capabilities. None of them is optional —
 without each one, the listed feature stops working:
@@ -247,6 +269,15 @@ to the clipboard instead.
 | `~/.config/zellij-linear/config.toml` | OAuth client ID + callback port (written by `configure`)     |
 | `~/.config/zellij-linear/auth.json`   | OAuth access + refresh tokens (written by `login`, `0600`)   |
 | `./.linear.toml`                      | Per-project config (written by `init`); see `examples/`      |
+
+## Troubleshooting
+
+Set `debug = true` at the top of `.linear.toml` to append diagnostics
+to `/tmp/zellij-linear.log` (Zellij auto-mounts the host's TMPDIR
+there — on macOS that's `/var/folders/.../T/zellij-501/zellij-linear.log`).
+The log shows `load()` config parsing, every `update()` event,
+`render()` calls with state snapshot, web request bodies, and the
+resolved assignee filter. No-op when unset.
 
 ## Roadmap
 

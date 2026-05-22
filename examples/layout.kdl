@@ -14,7 +14,10 @@ layout {
             // Your work pane: editor, shell, claude, etc. Leave empty to
             // get a plain shell.
         }
-        pane size="25%" {
+        pane size="25%" focus=true {
+            // focus=true ensures Zellij's first-run permission dialog
+            // receives the `y` keypress. Without it the prompt renders
+            // in the pane but key events go to the left-hand work pane.
             plugin location="file:~/.config/zellij/plugins/zellij-linear.wasm"
         }
     }

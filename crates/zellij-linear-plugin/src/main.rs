@@ -16,7 +16,7 @@ use crate::api::{
 };
 use crate::bridge::{render_prompt, send_or_copy, SendOutcome, DEFAULT_PROMPT_TEMPLATE};
 use crate::state::{State, View, LOADING_HOLD_MS, MAX_CONSECUTIVE_AUTH_FAILURES};
-use crate::util::iso8601_now;
+use crate::util::{debug_log, iso8601_now, set_debug};
 
 register_plugin!(State);
 
@@ -40,25 +40,44 @@ const SUBSCRIBED_EVENTS: &[EventType] = &[
 
 impl ZellijPlugin for State {
     fn load(&mut self, configuration: BTreeMap<String, String>) {
+        // Layout-level opt-in: `plugin { ... debug "true" }` flips
+        // logging on even before .linear.toml has been read.
+        if configuration.get("debug").map(|v| v == "true").unwrap_or(false) {
+            set_debug(true);
+        }
+        debug_log("load: entered");
         self.plugin_config = configuration;
         self.loading_hold_until = crate::util::now_millis().saturating_add(LOADING_HOLD_MS);
-        // Wake up after the hold so the renderer can swap to the issue
-        // list even if no other event happens to fire.
         set_timeout((LOADING_HOLD_MS as f64 / 1000.0) + 0.05);
 
-        // Subscribe before requesting permissions so we don't miss the
-        // PermissionRequestResult event that triggers token bootstrap.
         subscribe(SUBSCRIBED_EVENTS);
         request_permission(REQUIRED_PERMISSIONS);
 
         match config::load_from_host() {
-            Ok(Some(cfg)) => self.config = Some(cfg),
-            Ok(None) => {} // surfaced in the renderer
-            Err(msg) => self.config_error = Some(msg),
+            Ok(Some(cfg)) => {
+                if cfg.debug {
+                    set_debug(true);
+                }
+                debug_log(&format!(
+                    "load: cfg ok project_id={:?} assignee={:?} debug={}",
+                    cfg.project_id, cfg.filter.assignee, cfg.debug
+                ));
+                self.config = Some(cfg);
+            }
+            Ok(None) => debug_log("load: no .linear.toml on /host"),
+            Err(msg) => {
+                debug_log(&format!("load: cfg error: {msg}"));
+                self.config_error = Some(msg);
+            }
         }
+        debug_log("load: exiting");
     }
 
     fn update(&mut self, event: Event) -> bool {
+        debug_log(&format!(
+            "update: {:?}",
+            std::mem::discriminant(&event)
+        ));
         match event {
             Event::PermissionRequestResult(status) => self.on_permissions(status),
             Event::Key(key) => self.on_key(key),
@@ -79,6 +98,14 @@ impl ZellijPlugin for State {
     }
 
     fn render(&mut self, rows: usize, cols: usize) {
+        debug_log(&format!(
+            "render: r={rows} c={cols} perms={} token={} cfg={} loaded={} err={:?}",
+            self.permissions_granted,
+            self.access_token.is_some(),
+            self.config.is_some(),
+            self.initial_load_done,
+            self.last_error
+        ));
         self.prune_expired_status();
         ui::render(self, rows, cols);
     }
@@ -181,6 +208,9 @@ impl State {
         let project_id = cfg.project_id.clone();
         let state_types = cfg.state_types();
         let assignee = cfg.assignee_filter();
+        debug_log(&format!(
+            "dispatch_fetch: assignee={assignee:?} project_id={project_id:?} states={state_types:?}"
+        ));
         let full = self.poll.should_full_refresh();
         let since = if full {
             None
@@ -201,6 +231,14 @@ impl State {
 
     fn on_web(&mut self, status: u16, body: Vec<u8>, context: BTreeMap<String, String>) -> bool {
         let kind = context.get(ctx::KIND).map(String::as_str).unwrap_or("");
+        let snippet = std::str::from_utf8(&body)
+            .unwrap_or("")
+            .chars()
+            .take(300)
+            .collect::<String>();
+        debug_log(&format!(
+            "on_web: kind={kind} status={status} body[0..300]={snippet:?}"
+        ));
         if kind != KIND_FETCH_ISSUES {
             return false;
         }

@@ -11,6 +11,10 @@
 project_id = "00000000-0000-0000-0000-000000000000"
 # project_name = "Mobile app v2"
 
+# Set to true to append diagnostics to /tmp/zellij-linear.log
+# (Zellij auto-mounts the host's TMPDIR there). No-op by default.
+# debug = true
+
 [filter]
 # Linear state.type enum values: backlog | unstarted | started | completed | canceled | triage.
 states = ["backlog", "unstarted", "started"]

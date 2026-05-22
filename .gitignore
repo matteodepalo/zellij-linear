@@ -13,3 +13,7 @@ Cargo.lock.bak
 *.swp
 *.swo
 .DS_Store
+
+# memsearch plugin scratch dir (Claude Code's memsearch indexes session
+# notes here per-project; not source).
+.memsearch/

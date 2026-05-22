@@ -1,6 +1,39 @@
 //! Tiny time helpers — kept here to avoid pulling in `chrono`/`time`.
 
+use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Gates [`debug_log`]. Flipped by `set_debug` once `.linear.toml`
+/// (or the layout's plugin_config) is parsed. Defaults to `false`
+/// so the very first `load()` call writes nothing unless the layout
+/// explicitly opts in.
+static DEBUG_ENABLED: AtomicBool = AtomicBool::new(false);
+
+pub fn set_debug(enabled: bool) {
+    DEBUG_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+pub fn debug_enabled() -> bool {
+    DEBUG_ENABLED.load(Ordering::Relaxed)
+}
+
+/// Append a diagnostic line to `/tmp/zellij-linear.log` (Zellij
+/// auto-mounts the host's TMPDIR to `/tmp` inside the wasm sandbox).
+/// No-op unless `debug = true` is set in `.linear.toml` or the layout
+/// passes `debug "true"` as plugin config.
+pub fn debug_log(msg: &str) {
+    if !debug_enabled() {
+        return;
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open("/tmp/zellij-linear.log")
+    {
+        let _ = writeln!(f, "[{}] {msg}", now_unix());
+    }
+}
 
 pub fn now_millis() -> u64 {
     SystemTime::now()

@@ -7,6 +7,10 @@ use serde::Deserialize;
 pub struct ProjectConfig {
     pub project_id: Option<String>,
     pub project_name: Option<String>,
+    /// `debug = true` writes diagnostics to `/tmp/zellij-linear.log`.
+    /// No-op by default.
+    #[serde(default)]
+    pub debug: bool,
     #[serde(default)]
     pub filter: FilterConfig,
     #[serde(default)]
