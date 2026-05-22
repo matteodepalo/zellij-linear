@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/linear-client",
+    "crates/zellij-linear",
+    "crates/zellij-linear-plugin",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/matteodepalo/zellij-linear"
+authors = ["Matteo De Palo <matteo@depalo.me>"]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+anyhow = "1"
+thiserror = "2"

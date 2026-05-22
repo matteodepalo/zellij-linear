@@ -1,0 +1,102 @@
+//! GraphQL query strings. Kept as string constants — Linear's schema is
+//! stable enough that hand-written queries are simpler than codegen.
+
+/// Returns the authenticated user. Used after OAuth exchange to record
+/// who logged in.
+pub const Q_VIEWER: &str = r#"
+query Viewer {
+  viewer { id name email }
+}
+"#;
+
+/// Full refresh: issues assigned to the viewer in the given project,
+/// filtered by `state.type`. No `updatedAt` clause.
+pub const Q_ASSIGNED_ISSUES_FULL: &str = r#"
+query AssignedIssuesFull(
+  $projectId: ID
+  $stateTypes: [String!]
+  $first: Int = 50
+) {
+  viewer {
+    assignedIssues(
+      filter: {
+        project: { id: { eq: $projectId } }
+        state: { type: { in: $stateTypes } }
+      }
+      orderBy: updatedAt
+      first: $first
+    ) {
+      nodes {
+        id
+        identifier
+        title
+        description
+        priority
+        url
+        updatedAt
+        state { name type color }
+        labels { nodes { name color } }
+      }
+    }
+  }
+}
+"#;
+
+/// Delta poll: same as full refresh but with `updatedAt: { gt: $since }`.
+/// `$since` is required — for full refreshes use [`Q_ASSIGNED_ISSUES_FULL`].
+pub const Q_ASSIGNED_ISSUES_DELTA: &str = r#"
+query AssignedIssuesDelta(
+  $projectId: ID
+  $stateTypes: [String!]
+  $since: DateTimeOrDuration!
+  $first: Int = 50
+) {
+  viewer {
+    assignedIssues(
+      filter: {
+        project: { id: { eq: $projectId } }
+        state: { type: { in: $stateTypes } }
+        updatedAt: { gt: $since }
+      }
+      orderBy: updatedAt
+      first: $first
+    ) {
+      nodes {
+        id
+        identifier
+        title
+        description
+        priority
+        url
+        updatedAt
+        state { name type color }
+        labels { nodes { name color } }
+      }
+    }
+  }
+}
+"#;
+
+/// Single issue with comments — used for detail view (v0.1 renders
+/// in-place; v0.2 will float).
+pub const Q_ISSUE_DETAIL: &str = r#"
+query IssueDetail($id: String!) {
+  issue(id: $id) {
+    id
+    identifier
+    title
+    description
+    url
+    updatedAt
+    state { name type color }
+    labels { nodes { name color } }
+    comments(first: 50, orderBy: createdAt) {
+      nodes {
+        body
+        createdAt
+        user { name email }
+      }
+    }
+  }
+}
+"#;

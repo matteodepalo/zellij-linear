@@ -1,0 +1,24 @@
+[package]
+name = "zellij-linear"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Companion CLI for the zellij-linear plugin: OAuth login + token helper."
+
+[[bin]]
+name = "zellij-linear"
+path = "src/main.rs"
+
+[dependencies]
+linear-client = { path = "../linear-client" }
+serde_json.workspace = true
+anyhow.workspace = true
+url.workspace = true
+
+clap = { version = "4", features = ["derive"] }
+reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"], default-features = false }
+tiny_http = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.8"
+webbrowser = "1"

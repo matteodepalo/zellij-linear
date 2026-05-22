@@ -1,0 +1,25 @@
+// Always-on Linear sidebar at 25% width on the right. Pair this with a
+// `.linear.toml` in the session's cwd.
+//
+// Adjust the editor command in the left pane to taste; the right pane
+// loads the plugin from `~/.config/zellij/plugins/zellij-linear.wasm`.
+
+layout {
+    pane size=1 borderless=true {
+        plugin location="zellij:tab-bar"
+    }
+
+    pane split_direction="vertical" {
+        pane size="75%" {
+            // Your work pane: editor, shell, claude, etc. Leave empty to
+            // get a plain shell.
+        }
+        pane size="25%" {
+            plugin location="file:~/.config/zellij/plugins/zellij-linear.wasm"
+        }
+    }
+
+    pane size=2 borderless=true {
+        plugin location="zellij:status-bar"
+    }
+}

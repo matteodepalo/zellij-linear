@@ -1,0 +1,12 @@
+[package]
+name = "linear-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared Linear.app API client types and queries for zellij-linear."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+url.workspace = true
+thiserror.workspace = true
