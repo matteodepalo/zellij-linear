@@ -15,6 +15,11 @@ use thiserror::Error;
 use crate::http::{HttpClient, HttpError, HttpResponse, HttpVerb};
 use crate::LINEAR_OAUTH_TOKEN;
 
+/// Refresh tokens this many seconds *before* they actually expire — the
+/// CLI uses this for both `status` (display) and `token` (decision to
+/// refresh).
+pub const REFRESH_SKEW_SECS: u64 = 300;
+
 /// Persisted OAuth state. Forward-compatible: unknown fields are dropped
 /// on read and rewritten without them.
 #[derive(Debug, Clone, Serialize, Deserialize)]

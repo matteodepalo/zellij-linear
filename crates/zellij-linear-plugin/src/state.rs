@@ -47,10 +47,18 @@ pub struct State {
     /// True once the initial Linear fetch has come back (even if empty).
     pub initial_load_done: bool,
 
-    /// Number of consecutive 401s; once we hit
+    /// Number of consecutive 401s; once it grows past
     /// [`MAX_CONSECUTIVE_AUTH_FAILURES`] we stop refreshing automatically
-    /// and surface a hard error instead.
+    /// and surface a hard error instead. With the constant at 2 we allow
+    /// two recoveries (3 failures total) before giving up.
     pub consecutive_auth_failures: u32,
+
+    /// `true` while a `KIND_REFRESH_TOKEN` shellout is outstanding. We
+    /// gate fetches on this so a timer tick during the refresh can't
+    /// race in and dispatch with the still-stale token (which would
+    /// 401 and bump `consecutive_auth_failures` a second time off a
+    /// single underlying credential failure).
+    pub auth_refresh_pending: bool,
 }
 
 pub const MAX_CONSECUTIVE_AUTH_FAILURES: u32 = 2;

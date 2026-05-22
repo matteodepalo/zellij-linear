@@ -7,12 +7,10 @@
 //! status messages, refresh notices, etc. must go to stderr.
 
 use anyhow::{Context, Result};
-use linear_client::auth::{auth_from_token, load, refresh, save};
+use linear_client::auth::{auth_from_token, load, refresh, save, REFRESH_SKEW_SECS};
 
 use crate::config;
 use crate::http_impl::ReqwestClient;
-
-const REFRESH_SKEW_SECS: u64 = 300;
 
 pub fn run() -> Result<()> {
     let mut auth = load().context("not logged in (run `zellij-linear login`)")?;

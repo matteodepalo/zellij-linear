@@ -14,7 +14,8 @@ pub fn iso8601_now() -> String {
 }
 
 /// Format unix seconds as `YYYY-MM-DDTHH:MM:SSZ` using Howard Hinnant's
-/// civil_from_days algorithm. Only valid for Gregorian dates 0001-9999.
+/// civil_from_days algorithm. Input is `u64`, so anything from the
+/// epoch (1970) onward is valid.
 pub fn iso8601_from_unix(secs: u64) -> String {
     let days = (secs / 86400) as i64;
     let time_of_day = secs % 86400;

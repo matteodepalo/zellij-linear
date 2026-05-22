@@ -99,6 +99,9 @@ impl State {
         let mut ctx = BTreeMap::new();
         ctx.insert("kind".to_string(), kind.to_string());
         ctx.insert("req_id".to_string(), self.next_req_id());
+        if kind == KIND_REFRESH_TOKEN {
+            self.auth_refresh_pending = true;
+        }
         run_command(&["zellij-linear", "token"], ctx);
     }
 
@@ -112,6 +115,9 @@ impl State {
         let kind = context.get("kind").cloned().unwrap_or_default();
         match kind.as_str() {
             KIND_GET_TOKEN | KIND_REFRESH_TOKEN => {
+                if kind == KIND_REFRESH_TOKEN {
+                    self.auth_refresh_pending = false;
+                }
                 if exit == Some(0) {
                     let token = String::from_utf8_lossy(&stdout).trim().to_string();
                     if token.is_empty() {
@@ -138,7 +144,10 @@ impl State {
     }
 
     fn kick_off_initial_fetch_or_retry(&mut self, kind: &str) {
-        if self.can_fetch() {
+        // Gate on !is_in_flight so a timer that raced through during the
+        // refresh shellout doesn't get its in-flight request overwritten
+        // (the response would then be dropped as stale).
+        if self.can_fetch() && !self.poll.is_in_flight() {
             self.dispatch_fetch();
         }
         // Only the bootstrap path needs to arm the recurring timer; refresh
@@ -150,6 +159,7 @@ impl State {
 
     fn can_fetch(&self) -> bool {
         self.access_token.is_some()
+            && !self.auth_refresh_pending
             && self
                 .config
                 .as_ref()
@@ -384,6 +394,15 @@ impl State {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn merge_issues_for_test(
+        &mut self,
+        incoming: Vec<linear_client::types::Issue>,
+        full: bool,
+    ) {
+        self.merge_issues(incoming, full);
+    }
+
     fn send_selected(&mut self, auto_submit_override: bool) {
         let Some(issue) = self.selected_issue().cloned() else {
             return;
@@ -415,5 +434,111 @@ impl State {
                 ));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use linear_client::types::{Issue, IssueState, Label, LabelConnection};
+
+    fn issue(id: &str, ident: &str, updated_at: &str) -> Issue {
+        Issue {
+            id: id.into(),
+            identifier: ident.into(),
+            title: format!("Title for {ident}"),
+            description: None,
+            priority: 3.0,
+            state: IssueState {
+                name: "Todo".into(),
+                state_type: "unstarted".into(),
+                color: "#000000".into(),
+            },
+            labels: LabelConnection::default(),
+            url: format!("https://linear.app/x/{ident}"),
+            updated_at: updated_at.into(),
+        }
+    }
+
+    #[test]
+    fn merge_full_replaces_existing() {
+        let mut s = State::default();
+        s.issues = vec![issue("old1", "ENG-1", "2026-05-22T00:00:00Z")];
+        s.merge_issues_for_test(vec![issue("new1", "ENG-9", "2026-05-22T01:00:00Z")], true);
+        assert_eq!(s.issues.len(), 1);
+        assert_eq!(s.issues[0].id, "new1");
+    }
+
+    #[test]
+    fn merge_full_with_empty_clears() {
+        let mut s = State::default();
+        s.issues = vec![issue("a", "ENG-1", "2026-05-22T00:00:00Z")];
+        s.merge_issues_for_test(vec![], true);
+        assert!(s.issues.is_empty());
+    }
+
+    #[test]
+    fn merge_delta_prepends_new_ids() {
+        let mut s = State::default();
+        s.issues = vec![issue("a", "ENG-1", "2026-05-22T00:00:00Z")];
+        s.merge_issues_for_test(vec![issue("b", "ENG-2", "2026-05-22T02:00:00Z")], false);
+        assert_eq!(s.issues.len(), 2);
+        assert_eq!(s.issues[0].id, "b", "new id prepended");
+        assert_eq!(s.issues[1].id, "a");
+    }
+
+    #[test]
+    fn merge_delta_replaces_matching_id_in_place() {
+        let mut s = State::default();
+        s.issues = vec![
+            issue("a", "ENG-1", "2026-05-22T00:00:00Z"),
+            issue("b", "ENG-2", "2026-05-22T01:00:00Z"),
+        ];
+        let mut updated = issue("a", "ENG-1", "2026-05-22T03:00:00Z");
+        updated.title = "Updated title".to_string();
+        s.merge_issues_for_test(vec![updated], false);
+        assert_eq!(s.issues.len(), 2, "no new row");
+        assert_eq!(s.issues[0].id, "a");
+        assert_eq!(s.issues[0].title, "Updated title");
+        assert_eq!(s.issues[1].id, "b", "untouched row keeps position");
+    }
+
+    #[test]
+    fn merge_clamps_selected_idx_when_list_shrinks() {
+        let mut s = State::default();
+        s.issues = vec![
+            issue("a", "ENG-1", "2026-05-22T00:00:00Z"),
+            issue("b", "ENG-2", "2026-05-22T01:00:00Z"),
+            issue("c", "ENG-3", "2026-05-22T02:00:00Z"),
+        ];
+        s.selected_idx = 2;
+        s.merge_issues_for_test(vec![issue("a", "ENG-1", "2026-05-22T00:00:00Z")], true);
+        assert_eq!(s.selected_idx, 0, "clamped to last valid index");
+    }
+
+    #[test]
+    fn merge_updates_cursor_to_newest_updated_at() {
+        let mut s = State::default();
+        s.merge_issues_for_test(
+            vec![
+                issue("a", "ENG-1", "2026-05-22T00:00:00Z"),
+                issue("b", "ENG-2", "2026-05-22T05:00:00Z"),
+                issue("c", "ENG-3", "2026-05-22T01:00:00Z"),
+            ],
+            true,
+        );
+        // CAUTION: lexicographic max equals chronological max only while
+        // Linear emits a stable RFC 3339 format with `Z`.
+        assert_eq!(
+            s.poll.last_updated_at.as_deref(),
+            Some("2026-05-22T05:00:00Z")
+        );
+    }
+
+    #[test]
+    fn merge_delta_into_empty_list_acts_like_full() {
+        let mut s = State::default();
+        s.merge_issues_for_test(vec![issue("a", "ENG-1", "2026-05-22T00:00:00Z")], false);
+        assert_eq!(s.issues.len(), 1);
     }
 }

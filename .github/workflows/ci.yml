@@ -8,7 +8,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
 
 jobs:
   check:
@@ -38,23 +37,26 @@ jobs:
       - name: rustfmt
         run: cargo fmt --all -- --check
 
+      # `-- -D warnings` keeps the lint-deny scoped to our crates; using
+      # `RUSTFLAGS=-D warnings` would also break the build on any
+      # deprecation warning in a transitive dependency.
       - name: clippy (native crates)
-        run: cargo clippy --workspace --exclude zellij-linear-plugin --all-targets
+        run: cargo clippy --locked --workspace --exclude zellij-linear-plugin --all-targets -- -D warnings
 
       - name: clippy (plugin, wasm32-wasip1)
-        run: cargo clippy -p zellij-linear-plugin --target wasm32-wasip1
+        run: cargo clippy --locked -p zellij-linear-plugin --target wasm32-wasip1 -- -D warnings
 
       - name: test (native crates)
-        run: cargo test --workspace --exclude zellij-linear-plugin
+        run: cargo test --locked --workspace --exclude zellij-linear-plugin
 
       - name: test (plugin, host target)
-        run: cargo test -p zellij-linear-plugin
+        run: cargo test --locked -p zellij-linear-plugin
 
       - name: build native CLI (release)
-        run: cargo build --release -p zellij-linear
+        run: cargo build --locked --release -p zellij-linear
 
       - name: build wasm plugin (release)
-        run: cargo build --release --target wasm32-wasip1 -p zellij-linear-plugin
+        run: cargo build --locked --release --target wasm32-wasip1 -p zellij-linear-plugin
 
       - name: upload artifacts
         uses: actions/upload-artifact@v4

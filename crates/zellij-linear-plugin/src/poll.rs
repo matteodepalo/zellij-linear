@@ -130,4 +130,22 @@ mod tests {
         p.clear_in_flight();
         assert!(!p.is_in_flight());
     }
+
+    #[test]
+    fn in_flight_timed_out_fires_past_threshold() {
+        let mut p = PollState::default();
+        // No request → never timed out.
+        assert!(!p.in_flight_timed_out());
+
+        p.mark_dispatched("99".to_string());
+        // Just dispatched → not yet timed out.
+        assert!(!p.in_flight_timed_out());
+
+        // Backdate beyond the timeout window.
+        p.in_flight_since = now_unix().saturating_sub(REQUEST_TIMEOUT_SECS + 5);
+        assert!(p.in_flight_timed_out());
+
+        p.clear_in_flight();
+        assert!(!p.in_flight_timed_out());
+    }
 }

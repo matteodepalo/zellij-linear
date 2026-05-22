@@ -1,7 +1,7 @@
 //! `zellij-linear status` — human-readable auth state.
 
 use anyhow::Result;
-use linear_client::auth::{auth_file_path, load, AuthError};
+use linear_client::auth::{auth_file_path, load, AuthError, REFRESH_SKEW_SECS};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn run() -> Result<()> {
@@ -17,7 +17,7 @@ pub fn run() -> Result<()> {
             println!("Auth file: {}", auth_file_path().display());
             if remaining == 0 {
                 println!("Access token expired — will refresh on next use");
-            } else if remaining < 300 {
+            } else if remaining < REFRESH_SKEW_SECS {
                 println!("Access token expires in {remaining}s (will refresh on next use)");
             } else {
                 println!("Access token expires in {remaining}s");
