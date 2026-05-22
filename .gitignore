@@ -2,8 +2,10 @@
 **/*.rs.bk
 Cargo.lock.bak
 
-# Local config that users shouldn't commit
+# Local config that users shouldn't commit; the annotated example is
+# committed via the explicit negation below.
 .linear.toml
+!examples/.linear.toml
 
 # IDE
 .idea/

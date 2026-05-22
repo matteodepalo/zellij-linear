@@ -1,0 +1,40 @@
+# zellij-linear — per-project configuration.
+#
+# Drop this file at the root of any folder you open with Zellij. The
+# plugin reads it from `/host/.linear.toml` (Zellij auto-mounts the
+# session cwd at `/host`). Identify the Linear project this folder
+# corresponds to by EITHER `project_id` (UUID, stable) OR
+# `project_name` (resolved on first run).
+
+project_id = "00000000-0000-0000-0000-000000000000"
+# project_name = "Mobile app v2"
+# team = "ENG"   # optional; narrows future per-team queries
+
+[filter]
+# Linear state.type enum values: backlog | unstarted | started | completed | canceled | triage.
+states = ["backlog", "unstarted", "started"]
+# "me" (default), "any", or a specific user id.
+assignee = "me"
+
+[claude]
+# Substring matched against PaneInfo.terminal_command to locate the
+# Claude pane in the current session. Override if you launch Claude
+# Code via a wrapper script.
+target_command = "claude"
+
+# false (default): paste-only — you press Enter to submit.
+# true:            append `\n` so Claude auto-submits the prompt.
+# Shift+C in the plugin always forces auto-submit regardless.
+auto_submit = false
+
+# v0.2 hook — Linear state to transition to on send. Parsed but
+# currently ignored.
+# transition_on_send = "In Progress"
+
+# Optional custom template. Available substitutions:
+#   {identifier} {title} {description} {labels_as_bullets} {url}
+# prompt_template = """
+# I'm working on {identifier}: {title}
+#
+# {description}
+# """
