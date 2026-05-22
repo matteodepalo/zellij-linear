@@ -77,6 +77,20 @@ query AssignedIssuesDelta(
 }
 "#;
 
+/// Projects the viewer can see. Used by `zellij-linear init` to let
+/// the user pick a project without leaving the terminal.
+pub const Q_PROJECTS: &str = r#"
+query Projects($first: Int = 100) {
+  projects(first: $first, orderBy: updatedAt) {
+    nodes {
+      id
+      name
+      teams(first: 5) { nodes { key name } }
+    }
+  }
+}
+"#;
+
 /// Single issue with comments — reserved for the v0.2 detail view; the
 /// plugin doesn't invoke this yet.
 #[allow(dead_code)]

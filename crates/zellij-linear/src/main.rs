@@ -1,6 +1,7 @@
 mod config;
 mod configure;
 mod http_impl;
+mod init;
 mod login;
 mod logout;
 mod pkce;
@@ -31,6 +32,16 @@ enum Cmd {
         #[arg(long)]
         callback_port: Option<u16>,
     },
+    /// Pick a Linear project and write `./.linear.toml`.
+    Init {
+        /// Project name (case-insensitive substring) or UUID.
+        /// Omit for an interactive picker.
+        #[arg(long)]
+        project: Option<String>,
+        /// Overwrite an existing `.linear.toml`.
+        #[arg(long)]
+        force: bool,
+    },
     /// Run the OAuth + PKCE authorization flow and persist tokens.
     Login,
     /// Delete the persisted auth file.
@@ -48,6 +59,7 @@ fn main() -> Result<()> {
             client_id,
             callback_port,
         } => configure::run(client_id, callback_port),
+        Cmd::Init { project, force } => init::run(project, force),
         Cmd::Login => login::run(),
         Cmd::Logout => logout::run(),
         Cmd::Status => status::run(),

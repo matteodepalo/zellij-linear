@@ -94,9 +94,14 @@ written `0600`.
 
 ```bash
 cd ~/code/my-project
-cp /path/to/zellij-linear/examples/.linear.toml .
-$EDITOR .linear.toml      # set project_id (copy from Linear's URL)
+zellij-linear init        # interactive picker over your Linear projects
 ```
+
+`init` lists the projects visible on your Linear workspace and writes
+`./.linear.toml` with the selected `project_id`, `project_name`, and
+`team`. For automation: `zellij-linear init --project <NAME|UUID>`
+skips the picker. See `examples/.linear.toml` for the full schema
+(state filters, Claude target command, prompt template).
 
 ### 6. Launch with the sidebar layout
 

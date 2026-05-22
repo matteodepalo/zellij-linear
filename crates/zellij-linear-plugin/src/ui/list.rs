@@ -39,8 +39,9 @@ pub fn render(state: &State, rows: usize, cols: usize) {
         return;
     }
     if state.config.is_none() {
-        println!("No .linear.toml in this folder.");
-        println!("Create one with `project_id = \"…\"`.");
+        println!("No .linear.toml here.");
+        println!("Run in this folder:");
+        println!("  zellij-linear init");
         return;
     }
     if !state.initial_load_done {

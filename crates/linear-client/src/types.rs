@@ -50,6 +50,38 @@ pub struct IssueConnection {
     pub nodes: Vec<Issue>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct Project {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub teams: TeamConnection,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct TeamConnection {
+    #[serde(default)]
+    pub nodes: Vec<Team>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Team {
+    pub key: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ProjectConnection {
+    #[serde(default)]
+    pub nodes: Vec<Project>,
+}
+
+/// Shape returned by [`Q_PROJECTS`](crate::queries::Q_PROJECTS).
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProjectsRoot {
+    pub projects: ProjectConnection,
+}
+
 /// Wraps any Linear GraphQL response payload.
 #[derive(Debug, Clone, Deserialize)]
 pub struct GraphQLResponse<T> {
