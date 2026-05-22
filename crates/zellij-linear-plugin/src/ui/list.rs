@@ -44,11 +44,14 @@ pub fn render(state: &State, rows: usize, cols: usize) {
         println!("  zellij-linear init");
         return;
     }
-    if !state.initial_load_done {
+    if state.is_loading() {
         println!("Loading issues…");
-        return;
-    }
-    if state.issues.is_empty() {
+        // Filler keeps the pane height stable so the swap to the issue
+        // list doesn't shift the footer when the hold expires.
+        for _ in 1..body_rows {
+            println!();
+        }
+    } else if state.issues.is_empty() {
         println!("No matching issues.");
     } else {
         render_issue_rows(state, cols, body_rows);
@@ -116,10 +119,10 @@ fn build_header(state: &State, cols: usize) -> String {
         .and_then(|c| c.project_name.clone())
         .or_else(|| state.config.as_ref().and_then(|c| c.project_id.clone()))
         .unwrap_or_else(|| "Linear".to_string());
-    let count = if state.initial_load_done {
-        format!("{}", state.issues.len())
-    } else {
+    let count = if state.is_loading() {
         "…".to_string()
+    } else {
+        format!("{}", state.issues.len())
     };
     let line = format!("{name}  ({count})");
     truncate(&line, cols).to_string()

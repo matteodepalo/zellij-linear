@@ -7,10 +7,16 @@ use zellij_tile::prelude::PaneInfo;
 
 use crate::config::ProjectConfig;
 use crate::poll::PollState;
-use crate::util::now_unix;
+use crate::util::{now_millis, now_unix};
 
 /// Transient status messages auto-clear this many seconds after being set.
 pub const STATUS_TTL_SECS: u64 = 5;
+
+/// Minimum time the "Loading…" UI stays visible after `load()` even if
+/// Linear's API answers faster. Without this, Zellij's terminal repaint
+/// pipeline coalesces the load/auth/fetch renders into one frame and
+/// the user sees a blank pane that abruptly becomes the issue list.
+pub const LOADING_HOLD_MS: u64 = 600;
 
 #[derive(Default)]
 pub struct State {
@@ -46,6 +52,11 @@ pub struct State {
 
     /// True once the initial Linear fetch has come back (even if empty).
     pub initial_load_done: bool,
+
+    /// Unix-millis timestamp until which [`is_loading`] returns `true`
+    /// regardless of `initial_load_done`. Lets the loading UI stay
+    /// visible for at least [`LOADING_HOLD_MS`] after `load()`.
+    pub loading_hold_until: u64,
 
     /// Number of consecutive 401s; once it grows past
     /// [`MAX_CONSECUTIVE_AUTH_FAILURES`] we stop refreshing automatically
@@ -117,5 +128,16 @@ impl State {
             Some((msg, expiry)) if *expiry > now_unix() => Some(msg.as_str()),
             _ => None,
         }
+    }
+
+    /// True if the renderer should still be showing the "Loading…"
+    /// state: either we haven't received data yet, or the post-load
+    /// hold window hasn't elapsed.
+    pub fn is_loading(&self) -> bool {
+        !self.initial_load_done || now_millis() < self.loading_hold_until
+    }
+
+    pub fn loading_hold_remaining_ms(&self) -> u64 {
+        self.loading_hold_until.saturating_sub(now_millis())
     }
 }

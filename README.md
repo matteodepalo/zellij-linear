@@ -140,13 +140,16 @@ so you can refer to it by name from anywhere:
 ```bash
 cd ~/code/my-project
 zellij --layout zellij-linear
+# or, to name the session at the same time:
+zellij -s my-project -n zellij-linear
 ```
 
-The layout puts your work pane on the left (75 %) and the sidebar on the
-right (25 %). On first run, Zellij prompts to grant the plugin's
-permissions — approve once, the grant is cached.
+(`-n / --new-session-with-layout` always creates a fresh session; `-l`
+combined with `-s` tries to *attach* to that session, which fails if it
+doesn't exist.)
 
-If you skipped `install.sh`, point at the file directly:
+The layout puts your work pane on the left (75 %) and the sidebar on the
+right (25 %). If you skipped `install.sh`, point at the file directly:
 
 ```bash
 zellij --layout /path/to/zellij-linear/examples/layout.kdl
@@ -159,6 +162,28 @@ pane size="25%" {
     plugin location="file:~/.config/zellij/plugins/zellij-linear.wasm"
 }
 ```
+
+### First-run permission prompt
+
+The first time a fresh wasm is loaded, Zellij shows a permission dialog
+in the plugin pane asking you to approve the capabilities it requested.
+The dialog can be hidden if the focus is somewhere else — if the
+sidebar looks blank on first launch, press `Ctrl+P` then `→` (or
+`Alt+→`) to move focus into the plugin pane. Approve with `y`. Zellij
+caches the grant; subsequent launches go straight to the sidebar
+without prompting.
+
+zellij-linear requests these capabilities. None of them is optional —
+without each one, the listed feature stops working:
+
+| Permission                | What it enables                                                                  |
+| ------------------------- | -------------------------------------------------------------------------------- |
+| `WebAccess`               | HTTP(S) calls to `api.linear.app/graphql` for issue polling                      |
+| `ReadApplicationState`    | discover the Claude pane via `PaneManifest.terminal_command`                     |
+| `ChangeApplicationState`  | focus the Claude pane before pasting, hide the plugin on `Esc`                   |
+| `WriteToStdin`            | the actual paste — `write_chars_to_pane_id` into the Claude pane                 |
+| `WriteToClipboard`        | clipboard fallback when no Claude pane is found, plus `y` / `Y` keybinds         |
+| `RunCommands`             | `zellij-linear token` (auth refresh) and `open` / `xdg-open` for `o` (open URL)  |
 
 ## Daily use
 

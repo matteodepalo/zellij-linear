@@ -15,7 +15,7 @@ use crate::api::{
     KIND_FETCH_ISSUES, KIND_GET_TOKEN, KIND_OPEN_URL, KIND_REFRESH_TOKEN,
 };
 use crate::bridge::{render_prompt, send_or_copy, SendOutcome, DEFAULT_PROMPT_TEMPLATE};
-use crate::state::{State, View, MAX_CONSECUTIVE_AUTH_FAILURES};
+use crate::state::{State, View, LOADING_HOLD_MS, MAX_CONSECUTIVE_AUTH_FAILURES};
 use crate::util::iso8601_now;
 
 register_plugin!(State);
@@ -41,6 +41,10 @@ const SUBSCRIBED_EVENTS: &[EventType] = &[
 impl ZellijPlugin for State {
     fn load(&mut self, configuration: BTreeMap<String, String>) {
         self.plugin_config = configuration;
+        self.loading_hold_until = crate::util::now_millis().saturating_add(LOADING_HOLD_MS);
+        // Wake up after the hold so the renderer can swap to the issue
+        // list even if no other event happens to fire.
+        set_timeout((LOADING_HOLD_MS as f64 / 1000.0) + 0.05);
 
         // Subscribe before requesting permissions so we don't miss the
         // PermissionRequestResult event that triggers token bootstrap.
@@ -220,6 +224,13 @@ impl State {
                 if was_empty_full && self.poll.last_updated_at.is_none() {
                     self.poll.last_updated_at = Some(iso8601_now());
                 }
+                // If the loading hold hasn't elapsed yet, wake up at
+                // its end so the issue list actually replaces the
+                // "Loading…" frame on screen.
+                let remaining = self.loading_hold_remaining_ms();
+                if remaining > 0 {
+                    set_timeout((remaining as f64 / 1000.0).max(0.05));
+                }
             }
             ParsedIssues::Unauthorized => {
                 self.consecutive_auth_failures = self.consecutive_auth_failures.saturating_add(1);
@@ -275,7 +286,10 @@ impl State {
             self.dispatch_fetch();
         }
         self.schedule_next_poll();
-        false
+        // Always render on timer ticks so the loading-hold elapse swaps
+        // the "Loading…" frame for the issue list even if no other
+        // event fires.
+        true
     }
 
     fn schedule_next_poll(&self) {
