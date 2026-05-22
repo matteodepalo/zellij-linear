@@ -180,6 +180,7 @@ impl State {
         };
         let project_id = cfg.project_id.clone();
         let state_types = cfg.state_types();
+        let assignee = cfg.assignee_filter();
         let full = self.poll.should_full_refresh();
         let since = if full {
             None
@@ -192,6 +193,7 @@ impl State {
             access_token: &token,
             project_id: project_id.as_deref(),
             state_types: &state_types,
+            assignee: &assignee,
             since: since.as_deref(),
             req_id: &req_id,
         });
@@ -454,7 +456,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linear_client::types::{Issue, IssueState, Label, LabelConnection};
+    use linear_client::types::{Issue, IssueState, LabelConnection};
 
     fn issue(id: &str, ident: &str, updated_at: &str) -> Issue {
         Issue {
@@ -476,8 +478,10 @@ mod tests {
 
     #[test]
     fn merge_full_replaces_existing() {
-        let mut s = State::default();
-        s.issues = vec![issue("old1", "ENG-1", "2026-05-22T00:00:00Z")];
+        let mut s = State {
+            issues: vec![issue("old1", "ENG-1", "2026-05-22T00:00:00Z")],
+            ..State::default()
+        };
         s.merge_issues_for_test(vec![issue("new1", "ENG-9", "2026-05-22T01:00:00Z")], true);
         assert_eq!(s.issues.len(), 1);
         assert_eq!(s.issues[0].id, "new1");
@@ -485,16 +489,20 @@ mod tests {
 
     #[test]
     fn merge_full_with_empty_clears() {
-        let mut s = State::default();
-        s.issues = vec![issue("a", "ENG-1", "2026-05-22T00:00:00Z")];
+        let mut s = State {
+            issues: vec![issue("a", "ENG-1", "2026-05-22T00:00:00Z")],
+            ..State::default()
+        };
         s.merge_issues_for_test(vec![], true);
         assert!(s.issues.is_empty());
     }
 
     #[test]
     fn merge_delta_prepends_new_ids() {
-        let mut s = State::default();
-        s.issues = vec![issue("a", "ENG-1", "2026-05-22T00:00:00Z")];
+        let mut s = State {
+            issues: vec![issue("a", "ENG-1", "2026-05-22T00:00:00Z")],
+            ..State::default()
+        };
         s.merge_issues_for_test(vec![issue("b", "ENG-2", "2026-05-22T02:00:00Z")], false);
         assert_eq!(s.issues.len(), 2);
         assert_eq!(s.issues[0].id, "b", "new id prepended");
@@ -503,11 +511,13 @@ mod tests {
 
     #[test]
     fn merge_delta_replaces_matching_id_in_place() {
-        let mut s = State::default();
-        s.issues = vec![
-            issue("a", "ENG-1", "2026-05-22T00:00:00Z"),
-            issue("b", "ENG-2", "2026-05-22T01:00:00Z"),
-        ];
+        let mut s = State {
+            issues: vec![
+                issue("a", "ENG-1", "2026-05-22T00:00:00Z"),
+                issue("b", "ENG-2", "2026-05-22T01:00:00Z"),
+            ],
+            ..State::default()
+        };
         let mut updated = issue("a", "ENG-1", "2026-05-22T03:00:00Z");
         updated.title = "Updated title".to_string();
         s.merge_issues_for_test(vec![updated], false);
@@ -519,13 +529,15 @@ mod tests {
 
     #[test]
     fn merge_clamps_selected_idx_when_list_shrinks() {
-        let mut s = State::default();
-        s.issues = vec![
-            issue("a", "ENG-1", "2026-05-22T00:00:00Z"),
-            issue("b", "ENG-2", "2026-05-22T01:00:00Z"),
-            issue("c", "ENG-3", "2026-05-22T02:00:00Z"),
-        ];
-        s.selected_idx = 2;
+        let mut s = State {
+            issues: vec![
+                issue("a", "ENG-1", "2026-05-22T00:00:00Z"),
+                issue("b", "ENG-2", "2026-05-22T01:00:00Z"),
+                issue("c", "ENG-3", "2026-05-22T02:00:00Z"),
+            ],
+            selected_idx: 2,
+            ..State::default()
+        };
         s.merge_issues_for_test(vec![issue("a", "ENG-1", "2026-05-22T00:00:00Z")], true);
         assert_eq!(s.selected_idx, 0, "clamped to last valid index");
     }

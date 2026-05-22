@@ -9,23 +9,13 @@ query Viewer {
 }
 "#;
 
-/// Full refresh: issues assigned to the viewer in the given project,
-/// filtered by `state.type`. No `updatedAt` clause.
-pub const Q_ASSIGNED_ISSUES_FULL: &str = r#"
-query AssignedIssuesFull(
-  $projectId: ID
-  $stateTypes: [String!]
-  $first: Int = 50
-) {
+/// Viewer-scoped issues query — used when `filter.assignee = "me"`.
+/// The `$filter` variable is built in Rust to optionally include an
+/// `updatedAt: { gt: ... }` clause (delta) or omit it (full refresh).
+pub const Q_VIEWER_ISSUES: &str = r#"
+query ViewerIssues($filter: IssueFilter, $first: Int = 50) {
   viewer {
-    assignedIssues(
-      filter: {
-        project: { id: { eq: $projectId } }
-        state: { type: { in: $stateTypes } }
-      }
-      orderBy: updatedAt
-      first: $first
-    ) {
+    assignedIssues(filter: $filter, orderBy: updatedAt, first: $first) {
       nodes {
         id
         identifier
@@ -42,36 +32,22 @@ query AssignedIssuesFull(
 }
 "#;
 
-/// Delta poll: same as full refresh but with `updatedAt: { gt: $since }`.
-/// `$since` is required — for full refreshes use [`Q_ASSIGNED_ISSUES_FULL`].
-pub const Q_ASSIGNED_ISSUES_DELTA: &str = r#"
-query AssignedIssuesDelta(
-  $projectId: ID
-  $stateTypes: [String!]
-  $since: DateTimeOrDuration!
-  $first: Int = 50
-) {
-  viewer {
-    assignedIssues(
-      filter: {
-        project: { id: { eq: $projectId } }
-        state: { type: { in: $stateTypes } }
-        updatedAt: { gt: $since }
-      }
-      orderBy: updatedAt
-      first: $first
-    ) {
-      nodes {
-        id
-        identifier
-        title
-        description
-        priority
-        url
-        updatedAt
-        state { name type color }
-        labels { nodes { name color } }
-      }
+/// Top-level issues query — used when `filter.assignee = "any"` (the
+/// default) or a specific user UUID. The `$filter` variable carries
+/// project/state/assignee/updatedAt clauses assembled in Rust.
+pub const Q_PROJECT_ISSUES: &str = r#"
+query ProjectIssues($filter: IssueFilter, $first: Int = 50) {
+  issues(filter: $filter, orderBy: updatedAt, first: $first) {
+    nodes {
+      id
+      identifier
+      title
+      description
+      priority
+      url
+      updatedAt
+      state { name type color }
+      labels { nodes { name color } }
     }
   }
 }
@@ -86,31 +62,6 @@ query Projects($first: Int = 100) {
       id
       name
       teams(first: 5) { nodes { key name } }
-    }
-  }
-}
-"#;
-
-/// Single issue with comments — reserved for the v0.2 detail view; the
-/// plugin doesn't invoke this yet.
-#[allow(dead_code)]
-pub const Q_ISSUE_DETAIL: &str = r#"
-query IssueDetail($id: String!) {
-  issue(id: $id) {
-    id
-    identifier
-    title
-    description
-    url
-    updatedAt
-    state { name type color }
-    labels { nodes { name color } }
-    comments(first: 50, orderBy: createdAt) {
-      nodes {
-        body
-        createdAt
-        user { name email }
-      }
     }
   }
 }

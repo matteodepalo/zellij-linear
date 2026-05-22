@@ -130,7 +130,13 @@ zellij-linear init --project <UUID> --force   # overwrite an existing .linear.to
 
 `init` lists the projects on your Linear workspace, lets you pick one,
 and writes `./.linear.toml`. See `examples/.linear.toml` for the full
-schema (state filters, Claude target command, prompt template).
+schema (state filters, assignee filter, Claude target command, prompt
+template).
+
+By default the sidebar shows **every issue in the project** the viewer
+can see. To narrow it to "what's on my plate", set
+`filter.assignee = "me"` in `.linear.toml`. You can also pin to a
+specific user by passing their UUID.
 
 ## Launching
 
@@ -242,13 +248,10 @@ to the clipboard instead.
 | `~/.config/zellij-linear/auth.json`   | OAuth access + refresh tokens (written by `login`, `0600`)   |
 | `./.linear.toml`                      | Per-project config (written by `init`); see `examples/`      |
 
-## Roadmap (out of v0.1)
+## Roadmap
 
-- `s` keybind to transition state without leaving the sidebar
-- Comments view in an issue-detail overlay
-- Multi-project switcher
-- Auto-resolve project from `git remote origin` URL
-- Background polling variant shared across sessions
+See [`ROADMAP.md`](./ROADMAP.md) for proposed improvements (issue-detail
+overlay, state transitions on send, multi-project switcher, etc.).
 
 ## License
 

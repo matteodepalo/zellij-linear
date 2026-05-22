@@ -121,6 +121,33 @@ pub struct AssignedIssues {
     pub assigned_issues: IssueConnection,
 }
 
+/// `{ issues: { nodes [...] } }` — top-level issues query, used when
+/// the assignee filter is not viewer-scoped.
+#[derive(Debug, Clone, Deserialize)]
+pub struct IssuesRoot {
+    pub issues: IssueConnection,
+}
+
+/// Untagged union of the two possible response shapes for the issue
+/// fetch. Serde picks whichever variant deserializes successfully —
+/// `Q_VIEWER_ISSUES` produces the `Viewer` arm and `Q_PROJECT_ISSUES`
+/// produces the `Project` arm.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum IssuesPayload {
+    Viewer(ViewerWrapper<AssignedIssues>),
+    Project(IssuesRoot),
+}
+
+impl IssuesPayload {
+    pub fn into_nodes(self) -> Vec<Issue> {
+        match self {
+            Self::Viewer(v) => v.viewer.assigned_issues.nodes,
+            Self::Project(p) => p.issues.nodes,
+        }
+    }
+}
+
 /// Numeric Linear priorities.
 pub mod priority {
     pub const NO_PRIORITY: f64 = 0.0;
