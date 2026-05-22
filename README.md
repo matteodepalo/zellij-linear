@@ -54,18 +54,19 @@ cp target/wasm32-wasip1/release/zellij-linear-plugin.wasm \
 cp target/release/zellij-linear /usr/local/bin/
 ```
 
-### 3. Register a Linear OAuth application
+### 3. (Optional) Register your own Linear OAuth application
 
-zellij-linear uses OAuth 2.0 + PKCE — no API keys, no `client_secret`.
+The repo ships with a `LINEAR_CLIENT_ID` registered for the public
+`zellij-plugin` application — `zellij-linear login` will work out of
+the box against that. If you want to run against your own app instead
+(e.g. for branding or scope tweaks):
 
 1. Open <https://linear.app/settings/api/applications> and create a new
-   public application.
-2. Add redirect URIs for the localhost ports tiny_http might bind to. The
-   simplest is to set a single fixed redirect URI such as
-   `http://localhost:54173/cb` and add `RFC8252` localhost loopback
-   handling on the server side (Linear supports loopback per RFC8252).
-3. Copy the resulting **client ID** into `crates/linear-client/src/lib.rs`
-   (replace `REPLACE_ME_WITH_REGISTERED_CLIENT_ID`) and rebuild the CLI.
+   application.
+2. Add a redirect URI of `http://localhost:54173/cb` (matching
+   `LINEAR_OAUTH_CALLBACK_PORT` in `crates/linear-client/src/lib.rs`).
+   PKCE means no client secret is needed.
+3. Copy your client ID into `LINEAR_CLIENT_ID` and rebuild the CLI.
 
 ### 4. Log in
 

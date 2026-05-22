@@ -9,6 +9,7 @@ use linear_client::http::{HttpClient, HttpResponse, HttpVerb};
 use linear_client::types::{GraphQLResponse, Viewer, ViewerWrapper};
 use linear_client::{
     queries::Q_VIEWER, DEFAULT_SCOPES, LINEAR_CLIENT_ID, LINEAR_GRAPHQL, LINEAR_OAUTH_AUTHORIZE,
+    LINEAR_OAUTH_CALLBACK_PORT,
 };
 use url::Url;
 
@@ -18,26 +19,18 @@ use crate::pkce::{challenge_from_verifier, generate_state, generate_verifier};
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub fn run() -> Result<()> {
-    if LINEAR_CLIENT_ID == "REPLACE_ME_WITH_REGISTERED_CLIENT_ID" {
-        bail!(
-            "LINEAR_CLIENT_ID is a placeholder. Register an OAuth app at \
-             https://linear.app/settings/api/applications and set the constant \
-             in crates/linear-client/src/lib.rs before running `login`."
-        );
-    }
-
     let verifier = generate_verifier();
     let challenge = challenge_from_verifier(&verifier);
     let csrf_state = generate_state();
 
-    let listener = tiny_http::Server::http("127.0.0.1:0")
-        .map_err(|e| anyhow!("could not bind local callback listener: {e}"))?;
-    let port = listener
-        .server_addr()
-        .to_ip()
-        .ok_or_else(|| anyhow!("listener address is not an IP socket"))?
-        .port();
-    let redirect_uri = format!("http://localhost:{port}/cb");
+    let bind_addr = format!("127.0.0.1:{LINEAR_OAUTH_CALLBACK_PORT}");
+    let listener = tiny_http::Server::http(bind_addr.as_str()).map_err(|e| {
+        anyhow!(
+            "could not bind {bind_addr} for the OAuth callback ({e}). \
+             Another process is likely using that port — close it and retry."
+        )
+    })?;
+    let redirect_uri = format!("http://localhost:{LINEAR_OAUTH_CALLBACK_PORT}/cb");
 
     let mut authorize = Url::parse(LINEAR_OAUTH_AUTHORIZE)?;
     authorize
