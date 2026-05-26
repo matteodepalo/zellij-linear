@@ -154,8 +154,8 @@ zellij -s my-project -n zellij-linear
 combined with `-s` tries to *attach* to that session, which fails if it
 doesn't exist.)
 
-The layout puts your work pane on the left (75 %) and the sidebar on the
-right (25 %). If you skipped `install.sh`, point at the file directly:
+The layout puts your work pane on the left (65 %) and the sidebar on the
+right (35 %). If you skipped `install.sh`, point at the file directly:
 
 ```bash
 zellij --layout /path/to/zellij-linear/examples/layout.kdl
@@ -165,7 +165,7 @@ Or load the plugin into your own KDL — note the `focus=true` so the
 first-run permission dialog receives your `y` keypress:
 
 ```kdl
-pane size="25%" focus=true {
+pane size="35%" focus=true {
     plugin location="file:~/.config/zellij/plugins/zellij-linear.wasm"
 }
 ```
