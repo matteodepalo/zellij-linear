@@ -23,6 +23,17 @@ pub struct Issue {
     /// ISO-8601 timestamp; immutable. Drives the sidebar's display
     /// order (most recent at the top).
     pub created_at: String,
+    /// The owning team — needed to resolve the workflow state for
+    /// `claude.transition_on_send` (states are team-scoped).
+    pub team: TeamRef,
+}
+
+/// Minimal team reference embedded in issue responses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamRef {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,6 +145,7 @@ pub struct IssueDetail {
     pub url: String,
     pub updated_at: String,
     pub created_at: String,
+    pub team: TeamRef,
     #[serde(default)]
     pub comments: CommentConnection,
 }
@@ -154,6 +166,7 @@ impl IssueDetail {
             url: self.url.clone(),
             updated_at: self.updated_at.clone(),
             created_at: self.created_at.clone(),
+            team: self.team.clone(),
         }
     }
 }
@@ -227,6 +240,66 @@ pub mod priority {
     pub const HIGH: f64 = 2.0;
     pub const NORMAL: f64 = 3.0;
     pub const LOW: f64 = 4.0;
+}
+
+// =====================================================================
+// Workflow states (for `claude.transition_on_send`)
+// =====================================================================
+
+/// `{ teams: { nodes: [...] } }` — shape returned by `Q_TEAMS_WITH_STATES`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TeamsRoot {
+    pub teams: TeamsConnection,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TeamsConnection {
+    #[serde(default)]
+    pub nodes: Vec<TeamWithStates>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TeamWithStates {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub states: WorkflowStateConnection,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct WorkflowStateConnection {
+    #[serde(default)]
+    pub nodes: Vec<WorkflowStateRef>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorkflowStateRef {
+    pub id: String,
+    pub name: String,
+}
+
+/// `{ issueUpdate: { success: bool, issue: { state: {...} } } }` — shape
+/// returned by `M_ISSUE_UPDATE_STATE`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueUpdatePayload {
+    pub success: bool,
+    #[serde(default)]
+    pub issue: Option<IssueStateOnly>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueStateOnly {
+    pub identifier: String,
+    pub state: IssueState,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueUpdateRoot {
+    pub issue_update: IssueUpdatePayload,
 }
 
 /// `state.type` values from Linear's `WorkflowStateType` enum.

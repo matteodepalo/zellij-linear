@@ -18,22 +18,15 @@ spec. Treat it as a starting point.
   issue with its comment thread and renders it scrollable. The
   sidebar keeps polling the list; the detail instance is one-shot.
   Implemented in [`ui/detail.rs`](crates/zellij-linear-plugin/src/ui/detail.rs).
+- **State transition on send** — `claude.transition_on_send = "In
+  Progress"` (or any state name) in `.linear.toml` moves the issue to
+  that workflow state when its prompt is written to the Claude pane.
+  Case-insensitive, team-scoped, skipped on clipboard fallback.
+  Workflow-state IDs are cached at startup via
+  [`Q_TEAMS_WITH_STATES`](crates/linear-client/src/queries.rs) so the
+  send→transition path is a single mutation round-trip.
 
 ## Workflow features
-
-### State transition on send to Claude
-
-**Goal.** Pressing `c` should optionally move the issue to a workflow
-state (e.g. `Backlog → In Progress`) so the Linear UI reflects what
-you're actually working on.
-
-**Sketch.**
-- Re-add `claude.transition_on_send` to `ClaudeConfig` (name of the
-  target workflow state).
-- Resolve the state ID once at startup via a `query WorkflowStates($teamId: ID!)`
-  call and cache it.
-- After `send_or_copy()` returns `Sent`, fire a `mutation IssueUpdate($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }`.
-- Surface failures in the transient status line.
 
 ### `s` keybind: transition without leaving the sidebar
 

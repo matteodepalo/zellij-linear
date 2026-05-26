@@ -11,9 +11,11 @@ mod ui;
 mod util;
 
 use crate::api::{
-    ctx, fetch_assigned_issues, fetch_issue_detail, parse_detail_response, parse_issue_response,
-    FetchOptions, ParsedDetail, ParsedIssues, KIND_FETCH_DETAIL, KIND_FETCH_ISSUES,
-    KIND_GET_TOKEN, KIND_OPEN_URL, KIND_REFRESH_TOKEN,
+    ctx, dispatch_transition_issue, fetch_assigned_issues, fetch_issue_detail,
+    fetch_teams_with_states, parse_detail_response, parse_issue_response, parse_teams_response,
+    parse_transition_response, FetchOptions, ParsedDetail, ParsedIssues, ParsedTeams,
+    ParsedTransition, KIND_FETCH_DETAIL, KIND_FETCH_ISSUES, KIND_FETCH_TEAMS, KIND_GET_TOKEN,
+    KIND_OPEN_URL, KIND_REFRESH_TOKEN, KIND_TRANSITION_ISSUE,
 };
 use crate::bridge::{render_prompt, send_or_copy, SendOutcome, DEFAULT_PROMPT_TEMPLATE};
 use linear_client::types::Issue;
@@ -198,6 +200,13 @@ impl State {
     }
 
     fn kick_off_initial_fetch_or_retry(&mut self, kind: &str) {
+        // Both modes fire the one-shot teams-with-states query at startup
+        // so `claude.transition_on_send` can resolve state names locally
+        // without a per-send round-trip. Skip if the user hasn't asked
+        // for transitions (saves one HTTP request).
+        if kind == KIND_GET_TOKEN && self.transition_on_send_configured() {
+            self.dispatch_teams_fetch();
+        }
         match self.mode {
             PluginMode::Detail => {
                 // Single shot — no polling cadence, no recurring timer.
@@ -215,6 +224,23 @@ impl State {
                 }
             }
         }
+    }
+
+    fn transition_on_send_configured(&self) -> bool {
+        self.config
+            .as_ref()
+            .and_then(|c| c.claude.transition_on_send.as_deref())
+            .filter(|s| !s.trim().is_empty())
+            .is_some()
+    }
+
+    fn dispatch_teams_fetch(&mut self) {
+        let Some(token) = self.access_token.clone() else {
+            return;
+        };
+        let req_id = self.next_req_id();
+        debug_log("dispatch_teams_fetch: kicking off Q_TEAMS_WITH_STATES");
+        fetch_teams_with_states(&token, &req_id);
     }
 
     fn dispatch_detail_fetch(&mut self) {
@@ -284,6 +310,12 @@ impl State {
         ));
         if kind == KIND_FETCH_DETAIL {
             return self.on_detail_response(status, &body);
+        }
+        if kind == KIND_FETCH_TEAMS {
+            return self.on_teams_response(status, &body);
+        }
+        if kind == KIND_TRANSITION_ISSUE {
+            return self.on_transition_response(status, &body);
         }
         if kind != KIND_FETCH_ISSUES {
             return false;
@@ -363,6 +395,58 @@ impl State {
             ParsedDetail::Error(msg) => {
                 self.last_error = Some(msg);
                 self.initial_load_done = true;
+            }
+        }
+        true
+    }
+
+    fn on_teams_response(&mut self, status: u16, body: &[u8]) -> bool {
+        match parse_teams_response(status, body) {
+            ParsedTeams::Ok(root) => {
+                self.team_states.clear();
+                for team in root.teams.nodes {
+                    let mut by_name = std::collections::BTreeMap::new();
+                    for s in team.states.nodes {
+                        // Index by lowercase so the config match is
+                        // case-insensitive ("In Progress" ≡ "in progress").
+                        by_name.insert(s.name.to_ascii_lowercase(), s.id);
+                    }
+                    self.team_states.insert(team.id, by_name);
+                }
+                debug_log(&format!(
+                    "on_teams_response: cached states for {} teams",
+                    self.team_states.len()
+                ));
+            }
+            ParsedTeams::Unauthorized => {
+                debug_log("on_teams_response: 401 — letting next issues fetch trigger refresh");
+            }
+            ParsedTeams::Error(msg) => {
+                debug_log(&format!("on_teams_response: error {msg}"));
+            }
+        }
+        // No on-screen change from caching state IDs — skip the redraw.
+        false
+    }
+
+    fn on_transition_response(&mut self, status: u16, body: &[u8]) -> bool {
+        match parse_transition_response(status, body) {
+            ParsedTransition::Ok {
+                identifier,
+                state_name,
+            } => {
+                self.set_status(&format!("Moved {identifier} → {state_name}"));
+                // Burst-poll so the sidebar reflects the new state quickly.
+                self.poll.enter_burst();
+            }
+            ParsedTransition::Refused => {
+                self.set_status("Linear refused the transition (state unchanged?)");
+            }
+            ParsedTransition::Unauthorized => {
+                self.set_status("Transition failed: 401");
+            }
+            ParsedTransition::Error(msg) => {
+                self.set_status(&format!("Transition failed: {msg}"));
             }
         }
         true
@@ -775,6 +859,10 @@ impl State {
             SendOutcome::Sent => {
                 self.set_status(&format!("Sent {} to Claude", issue.identifier));
                 self.poll.enter_burst();
+                // Only transition on the success path — a clipboard
+                // fallback means the user might paste elsewhere, so
+                // moving the issue would be wrong.
+                self.maybe_transition_issue(issue);
             }
             SendOutcome::Copied => {
                 self.set_status(&format!(
@@ -783,6 +871,51 @@ impl State {
                 ));
             }
         }
+    }
+
+    /// Fire `M_ISSUE_UPDATE_STATE` if `claude.transition_on_send` is
+    /// configured and we have the target state's UUID cached. Silently
+    /// skips when not configured, when the teams cache hasn't loaded
+    /// yet, or when the named state doesn't exist in the issue's team.
+    fn maybe_transition_issue(&mut self, issue: &Issue) {
+        let target_name = match self
+            .config
+            .as_ref()
+            .and_then(|c| c.claude.transition_on_send.as_deref())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => s.to_string(),
+            None => return,
+        };
+        let Some(token) = self.access_token.clone() else {
+            return;
+        };
+        let team_id = &issue.team.id;
+        let Some(by_name) = self.team_states.get(team_id) else {
+            debug_log(&format!(
+                "transition: no cached states for team {team_id} (was Q_TEAMS_WITH_STATES run?)"
+            ));
+            self.set_status("Transition: team states not loaded yet");
+            return;
+        };
+        let key = target_name.to_ascii_lowercase();
+        let Some(state_id) = by_name.get(&key).cloned() else {
+            debug_log(&format!(
+                "transition: state {target_name:?} not in team {team_id} (available: {:?})",
+                by_name.keys().collect::<Vec<_>>()
+            ));
+            self.set_status(&format!(
+                "Transition: \"{target_name}\" not a state in this team"
+            ));
+            return;
+        };
+        let req_id = self.next_req_id();
+        debug_log(&format!(
+            "transition: {} → {target_name} (state_id={state_id})",
+            issue.identifier
+        ));
+        dispatch_transition_issue(&token, &issue.id, &state_id, &req_id);
     }
 
     fn copy_issue_body(&mut self, issue: &Issue) {
@@ -806,7 +939,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linear_client::types::{Issue, IssueState, LabelConnection};
+    use linear_client::types::{Issue, IssueState, LabelConnection, TeamRef};
 
     fn issue(id: &str, ident: &str, updated_at: &str) -> Issue {
         Issue {
@@ -826,6 +959,10 @@ mod tests {
             // Tests don't exercise createdAt ordering — pick a value
             // that keeps the merge tests deterministic.
             created_at: updated_at.into(),
+            team: TeamRef {
+                id: "team-1".into(),
+                name: "Team".into(),
+            },
         }
     }
 

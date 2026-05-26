@@ -52,6 +52,10 @@ pub struct ClaudeConfig {
     /// `{identifier}`, `{title}`, `{description}`, `{labels_as_bullets}`,
     /// `{url}`.
     pub prompt_template: Option<String>,
+    /// When the prompt is successfully written to the Claude pane, move
+    /// the issue to this Linear workflow state (case-insensitive match
+    /// against the team's `WorkflowState.name`). Unset = no transition.
+    pub transition_on_send: Option<String>,
 }
 
 impl ProjectConfig {

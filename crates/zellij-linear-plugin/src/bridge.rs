@@ -93,7 +93,7 @@ pub fn send_or_copy(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linear_client::types::{Issue, IssueState, Label, LabelConnection};
+    use linear_client::types::{Issue, IssueState, Label, LabelConnection, TeamRef};
 
     fn sample_issue() -> Issue {
         Issue {
@@ -122,6 +122,10 @@ mod tests {
             url: "https://linear.app/x/issue/ENG-1".into(),
             updated_at: "2026-05-22T00:00:00Z".into(),
             created_at: "2026-05-22T00:00:00Z".into(),
+            team: TeamRef {
+                id: "team-1".into(),
+                name: "Team".into(),
+            },
         }
     }
 

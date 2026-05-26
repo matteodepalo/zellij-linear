@@ -138,6 +138,24 @@ can see. To narrow it to "what's on my plate", set
 `filter.assignee = "me"` in `.linear.toml`. You can also pin to a
 specific user by passing their UUID.
 
+### Auto-transition on send
+
+Set `claude.transition_on_send = "In Progress"` (or any workflow state
+name) in `.linear.toml` to have the plugin move an issue to that state
+the moment its prompt lands in the Claude pane:
+
+```toml
+[claude]
+transition_on_send = "In Progress"
+```
+
+The match is case-insensitive and scoped to the issue's team, so the
+same setting works across projects that span multiple teams as long as
+each team has a state with that name. Transitions fire only when the
+prompt actually reaches a Claude pane — the clipboard fallback does
+not transition. The sidebar burst-polls for 2 minutes after a
+transition so the new state shows up within seconds.
+
 ## Launching
 
 `install.sh` already symlinked the layout into Zellij's layout directory,
@@ -306,7 +324,7 @@ resolved assignee filter. No-op when unset.
 ## Roadmap
 
 See [`ROADMAP.md`](./ROADMAP.md) for proposed improvements (issue-detail
-overlay, state transitions on send, multi-project switcher, etc.).
+overlay, multi-project switcher, webhook tunnel, etc.).
 
 ## License
 

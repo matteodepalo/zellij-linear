@@ -96,6 +96,12 @@ pub struct State {
     /// Number of issue rows visible in the list view (height of the
     /// click target zone).
     pub list_body_rows: usize,
+
+    /// `team_id -> (case-insensitive state_name -> state_id)`. Filled
+    /// once at startup by `Q_TEAMS_WITH_STATES` and consulted before
+    /// firing the `M_ISSUE_UPDATE_STATE` mutation when
+    /// `claude.transition_on_send` is set.
+    pub team_states: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 /// Y-coordinate of the first issue row in the list view (after the

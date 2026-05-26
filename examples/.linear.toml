@@ -40,3 +40,8 @@ auto_submit = false
 #
 # {description}
 # """
+
+# When the prompt has been written to the Claude pane, move the issue
+# to this workflow state (case-insensitive name match scoped to the
+# issue's team). Unset = no transition.
+# transition_on_send = "In Progress"

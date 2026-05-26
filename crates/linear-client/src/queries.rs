@@ -25,6 +25,7 @@ query ViewerIssues($filter: IssueFilter, $first: Int = 50) {
         url
         updatedAt
         createdAt
+        team { id name }
         state { name type color }
         labels { nodes { name color } }
       }
@@ -67,6 +68,7 @@ query IssueDetail($id: String!) {
     url
     updatedAt
     createdAt
+    team { id name }
     state { name type color }
     labels { nodes { name color } }
     comments(first: 50, orderBy: createdAt) {
@@ -75,6 +77,37 @@ query IssueDetail($id: String!) {
         createdAt
         user { name email }
       }
+    }
+  }
+}
+"#;
+
+/// Teams the user can see, with each team's workflow states. Fetched
+/// once at plugin startup and cached so `claude.transition_on_send` can
+/// resolve a state *name* (e.g. "In Progress") to the team-scoped state
+/// `id` (a UUID) without an extra round-trip per send.
+pub const Q_TEAMS_WITH_STATES: &str = r#"
+query TeamsWithStates($first: Int = 50) {
+  teams(first: $first) {
+    nodes {
+      id
+      name
+      states { nodes { id name } }
+    }
+  }
+}
+"#;
+
+/// Move an issue to a different workflow state. The plugin fires this
+/// after the prompt has been written to the Claude pane when
+/// `claude.transition_on_send` is set.
+pub const M_ISSUE_UPDATE_STATE: &str = r#"
+mutation TransitionIssue($id: String!, $stateId: String!) {
+  issueUpdate(id: $id, input: { stateId: $stateId }) {
+    success
+    issue {
+      identifier
+      state { name type color }
     }
   }
 }

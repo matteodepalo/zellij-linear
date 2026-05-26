@@ -6,8 +6,13 @@
 
 use std::collections::BTreeMap;
 
-use linear_client::queries::{Q_ISSUE_DETAIL, Q_PROJECT_ISSUES, Q_VIEWER_ISSUES};
-use linear_client::types::{GraphQLResponse, Issue, IssueDetail, IssueDetailRoot, IssuesPayload};
+use linear_client::queries::{
+    M_ISSUE_UPDATE_STATE, Q_ISSUE_DETAIL, Q_PROJECT_ISSUES, Q_TEAMS_WITH_STATES, Q_VIEWER_ISSUES,
+};
+use linear_client::types::{
+    GraphQLResponse, Issue, IssueDetail, IssueDetailRoot, IssueUpdateRoot, IssuesPayload,
+    TeamsRoot,
+};
 use linear_client::LINEAR_GRAPHQL;
 use serde_json::{json, Value};
 use zellij_tile::prelude::{web_request, HttpVerb};
@@ -24,6 +29,12 @@ pub const KIND_GET_TOKEN: &str = "get_token";
 pub const KIND_REFRESH_TOKEN: &str = "refresh_token";
 /// Tag attached to `open` / `xdg-open` invocations.
 pub const KIND_OPEN_URL: &str = "open_url";
+/// Tag attached to the one-shot `teams { … states { … } }` lookup at
+/// startup (used to resolve `claude.transition_on_send` state names).
+pub const KIND_FETCH_TEAMS: &str = "fetch_teams";
+/// Tag attached to the `issueUpdate` mutation that moves an issue to
+/// a different workflow state after a successful send-to-Claude.
+pub const KIND_TRANSITION_ISSUE: &str = "transition_issue";
 
 /// Context keys we attach to requests so responses can be routed.
 pub mod ctx {
@@ -161,6 +172,142 @@ pub fn parse_detail_response(status: u16, body: &[u8]) -> ParsedDetail {
     }
 }
 
+/// Fire the one-shot teams-with-states fetch. Response → `KIND_FETCH_TEAMS`.
+pub fn fetch_teams_with_states(access_token: &str, req_id: &str) {
+    let body = json!({
+        "query": Q_TEAMS_WITH_STATES,
+        "variables": {},
+    });
+    let body_bytes = serde_json::to_vec(&body).unwrap_or_default();
+    let mut headers = BTreeMap::new();
+    headers.insert(
+        "Authorization".to_string(),
+        format!("Bearer {access_token}"),
+    );
+    headers.insert("Content-Type".to_string(), "application/json".to_string());
+
+    let mut context = BTreeMap::new();
+    context.insert(ctx::KIND.to_string(), KIND_FETCH_TEAMS.to_string());
+    context.insert(ctx::REQ_ID.to_string(), req_id.to_string());
+
+    web_request(LINEAR_GRAPHQL, HttpVerb::Post, headers, body_bytes, context);
+}
+
+pub enum ParsedTeams {
+    Ok(TeamsRoot),
+    Unauthorized,
+    Error(String),
+}
+
+pub fn parse_teams_response(status: u16, body: &[u8]) -> ParsedTeams {
+    if status == 401 {
+        return ParsedTeams::Unauthorized;
+    }
+    if !(200..300).contains(&status) {
+        let snippet = std::str::from_utf8(body)
+            .unwrap_or("")
+            .chars()
+            .take(200)
+            .collect::<String>();
+        return ParsedTeams::Error(format!("HTTP {status}: {snippet}"));
+    }
+    let parsed: GraphQLResponse<TeamsRoot> = match serde_json::from_slice(body) {
+        Ok(p) => p,
+        Err(e) => return ParsedTeams::Error(format!("parse error: {e}")),
+    };
+    if !parsed.errors.is_empty() {
+        return ParsedTeams::Error(
+            parsed
+                .errors
+                .iter()
+                .map(|e| e.message.clone())
+                .collect::<Vec<_>>()
+                .join("; "),
+        );
+    }
+    match parsed.data {
+        Some(d) => ParsedTeams::Ok(d),
+        None => ParsedTeams::Error("teams: empty data".to_string()),
+    }
+}
+
+/// Fire the `issueUpdate(input: { stateId })` mutation. Caller is
+/// responsible for resolving `state_name → state_id` via the cache that
+/// `Q_TEAMS_WITH_STATES` populates.
+pub fn dispatch_transition_issue(access_token: &str, issue_id: &str, state_id: &str, req_id: &str) {
+    let body = json!({
+        "query": M_ISSUE_UPDATE_STATE,
+        "variables": { "id": issue_id, "stateId": state_id },
+    });
+    let body_bytes = serde_json::to_vec(&body).unwrap_or_default();
+    let mut headers = BTreeMap::new();
+    headers.insert(
+        "Authorization".to_string(),
+        format!("Bearer {access_token}"),
+    );
+    headers.insert("Content-Type".to_string(), "application/json".to_string());
+
+    let mut context = BTreeMap::new();
+    context.insert(ctx::KIND.to_string(), KIND_TRANSITION_ISSUE.to_string());
+    context.insert(ctx::REQ_ID.to_string(), req_id.to_string());
+
+    web_request(LINEAR_GRAPHQL, HttpVerb::Post, headers, body_bytes, context);
+}
+
+pub enum ParsedTransition {
+    /// Mutation reported `success: true`. Carries the new state name
+    /// (already team-scoped) and the issue identifier for the status
+    /// message.
+    Ok { identifier: String, state_name: String },
+    /// Mutation reported `success: false` — Linear refused (e.g., the
+    /// state was already current, or the user lacks write permission).
+    Refused,
+    Unauthorized,
+    Error(String),
+}
+
+pub fn parse_transition_response(status: u16, body: &[u8]) -> ParsedTransition {
+    if status == 401 {
+        return ParsedTransition::Unauthorized;
+    }
+    if !(200..300).contains(&status) {
+        let snippet = std::str::from_utf8(body)
+            .unwrap_or("")
+            .chars()
+            .take(200)
+            .collect::<String>();
+        return ParsedTransition::Error(format!("HTTP {status}: {snippet}"));
+    }
+    let parsed: GraphQLResponse<IssueUpdateRoot> = match serde_json::from_slice(body) {
+        Ok(p) => p,
+        Err(e) => return ParsedTransition::Error(format!("parse error: {e}")),
+    };
+    if !parsed.errors.is_empty() {
+        return ParsedTransition::Error(
+            parsed
+                .errors
+                .iter()
+                .map(|e| e.message.clone())
+                .collect::<Vec<_>>()
+                .join("; "),
+        );
+    }
+    let payload = match parsed.data {
+        Some(d) => d.issue_update,
+        None => return ParsedTransition::Error("transition: empty data".to_string()),
+    };
+    if !payload.success {
+        return ParsedTransition::Refused;
+    }
+    match payload.issue {
+        Some(i) => ParsedTransition::Ok {
+            identifier: i.identifier,
+            state_name: i.state.name,
+        },
+        None => ParsedTransition::Refused,
+    }
+}
+
 pub enum ParsedIssues {
     /// Full or delta response with the parsed issues.
     Ok(Vec<Issue>),
@@ -254,6 +401,7 @@ mod tests {
                 "id":"abc","identifier":"ENG-1","title":"Hi","description":null,
                 "priority":2.0,"url":"https://linear.app/x",
                 "updatedAt":"2026-05-22T00:00:00Z","createdAt":"2026-05-22T00:00:00Z",
+                "team":{"id":"team-1","name":"Team"},
                 "state":{"name":"In Progress","type":"started","color":"#f00"},
                 "labels":{"nodes":[]}
             }]}}}
@@ -277,6 +425,7 @@ mod tests {
                 "id":"xyz","identifier":"MAT-30","title":"Consolidate","description":null,
                 "priority":0.0,"url":"https://linear.app/x",
                 "updatedAt":"2026-03-31T08:42:08Z","createdAt":"2026-03-31T08:42:08Z",
+                "team":{"id":"team-1","name":"Team"},
                 "state":{"name":"Backlog","type":"backlog","color":"#aaa"},
                 "labels":{"nodes":[]}
             }]}}
