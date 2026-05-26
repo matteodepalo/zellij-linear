@@ -13,20 +13,13 @@ spec. Treat it as a starting point.
   Switches the sidebar between "everything in the project" and
   "what's on my plate." Implemented in [`config.rs`](crates/zellij-linear-plugin/src/config.rs)
   and [`api.rs`](crates/zellij-linear-plugin/src/api.rs).
+- **Floating detail pane** — `Enter` on a selected issue spawns a
+  second plugin instance in a floating Zellij pane that fetches the
+  issue with its comment thread and renders it scrollable. The
+  sidebar keeps polling the list; the detail instance is one-shot.
+  Implemented in [`ui/detail.rs`](crates/zellij-linear-plugin/src/ui/detail.rs).
 
 ## Workflow features
-
-### Issue-detail overlay with comments
-
-**Goal.** Inspect an issue without leaving the terminal — current
-description plus the comment thread, scrollable.
-
-**Sketch.**
-- Add `View::Detail(issue_id)` to `state::View`.
-- New GraphQL query: `query IssueDetail($id: String!) { issue(id) { ...; comments(first: 50, orderBy: createdAt) { nodes { body createdAt user { name } } } } }`.
-- Fetch lazily on `Enter` or `d` keybind from the list; cache per-issue
-  in `State` so toggling back is instant.
-- Reuse `ui::text::truncate` and the existing pane-width logic.
 
 ### State transition on send to Claude
 
@@ -87,6 +80,100 @@ inferred from the working directory.
   rather than silently picking.
 
 ## Architecture
+
+### Webhook delivery via user-owned tunnel (optional)
+
+**Goal.** Today the plugin polls Linear's GraphQL endpoint on a 60 s
+idle / 5 s burst cadence. For users who already run a tailnet, an
+opt-in webhook path could replace polling with push delivery — the
+sidebar reflects state changes within a second instead of up to a
+minute.
+
+**Sketch.**
+
+- Add a companion daemon (`zellij-linear webhook serve --port 8080`)
+  that binds a tiny HTTP listener on `127.0.0.1:8080` with a `/linear`
+  route. The plugin reads the latest issue snapshot from the daemon
+  over Unix-socket IPC (or by tailing a file the daemon writes).
+- User exposes the port publicly with **Tailscale Funnel**:
+  ```bash
+  tailscale funnel --bg 8080
+  # → https://<machine>.<tailnet>.ts.net/ now routes to localhost:8080
+  ```
+  Funnel is included on the free Personal plan, terminates TLS at
+  Tailscale's edge with an auto-issued cert, and only exposes ports
+  443 / 8443 / 10000 publicly. ([Tailscale Funnel docs](https://tailscale.com/kb/1223/funnel))
+- Configure the webhook directly on the **OAuth application** the
+  user already created during `zellij-linear configure`. Linear's
+  application settings (linear.app/settings/api/applications →
+  pick the app → Webhooks toggle) expose:
+  - a single **Webhook URL** field,
+  - a **Webhook signing secret** (revealed/copied from that page),
+  - per-event checkboxes (Issues, Comments, Issue Labels, Projects,
+    Cycles, Documents, Users, etc.).
+  This avoids the GraphQL `webhookCreate` mutation entirely for the
+  common case — no admin-scope token, no extra CLI subcommand
+  required. User pastes the Tailscale Funnel URL, ticks `Issues` +
+  `Comments` + `Issue Labels`, and copies the signing secret into
+  `~/.config/zellij-linear/webhook.toml` (or the OS keyring).
+- Daemon validates every POST: HMAC-SHA256 of the **raw** body against
+  the stored secret, constant-time compared to the `Linear-Signature`
+  header. Dedup on the `Linear-Delivery` UUID. Reject events whose
+  `webhookTimestamp` is older than ~5 minutes (replay defense).
+
+**Why this isn't trivial — flag in the design before implementing.**
+
+- *Tailscale dependency.* Requires the user to install Tailscale, sign
+  in, and have Funnel allowed in the tailnet ACL (`nodeAttrs` with
+  `funnel`). Corporate tailnets often forbid this.
+- *Re-authorization required.* Linear shows a warning on the OAuth
+  Webhooks pane: *"Anyone who has already authorized your application,
+  including installations in this workspace, will need to re-authorize
+  before webhooks will be received."* The setup flow has to instruct
+  the user to re-run `zellij-linear login` after toggling webhooks on,
+  otherwise nothing ever arrives.
+- *Liveness gap.* Webhooks are only delivered while the daemon's port
+  is reachable. Linear retries 3× over ~7 hours, then disables the
+  webhook. If the user's machine sleeps or the daemon dies, events
+  are lost. A low-frequency reconciliation poll (e.g., every 5 min,
+  plus on plugin open) is still required to plug gaps.
+- *Public hostname disclosure.* The webhook URL puts the user's
+  `<machine>.<tailnet>.ts.net` name on Linear's webhook config page,
+  which is visible to anyone with workspace-settings access.
+- *Single URL per OAuth app.* Linear's OAuth-app webhook config holds
+  one URL — using two machines (laptop + desktop) with the same OAuth
+  app means only one of them receives events. Multi-machine users
+  either run separate OAuth apps or fall back to polling on the
+  non-primary host.
+
+**Fallback.** Tunnel mode is opt-in via `.linear.toml`:
+
+```toml
+[webhook]
+enabled = true
+url = "https://my-laptop.tailnet-name.ts.net/linear"
+# signing secret stored in OS keyring under "zellij-linear/webhook/<id>"
+```
+
+When the section is absent the plugin uses today's polling cadence —
+no Tailscale, no admin scope, no extra deps. Mode selection happens
+once at startup; the plugin UI doesn't change because both paths feed
+the same in-memory issue store.
+
+**Setup guide (write later).** When this lands, add a README section
+walking the user through: (1) enable webhooks on their OAuth app at
+`linear.app/settings/api/applications/<id>`, paste the Funnel URL,
+tick `Issues`/`Comments`/`Issue Labels`, copy the signing secret;
+(2) `tailscale funnel --bg 8080`; (3) re-run `zellij-linear login`
+(re-auth required); (4) drop the `[webhook]` block in `.linear.toml`.
+Do NOT add this guide to the README before implementation — it
+references CLI flags and config keys that don't exist yet.
+
+**Linear docs.** [Webhooks reference](https://linear.app/developers/webhooks)
+covers payload shape, retry behavior, the `Linear-Signature` /
+`Linear-Delivery` / `Linear-Event` headers, and the optional
+`webhookCreate` GraphQL mutation (only needed if we ever need to
+register a second webhook independent of the OAuth app).
 
 ### Background polling shared across sessions
 
