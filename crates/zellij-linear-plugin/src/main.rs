@@ -432,15 +432,31 @@ impl State {
             return false;
         }
 
+        // Normalize Shift+<lowercase> → <uppercase>. Zellij's
+        // `KeyWithModifier::PartialEq` treats `Char('C')` and
+        // `Char('c') + Shift` as equivalent, and either form can be
+        // delivered to a plugin depending on the keyboard / config —
+        // fold both into the uppercase form so the `match` arms below
+        // only need to handle one shape.
+        let bare = match key.bare_key {
+            BareKey::Char(c)
+                if c.is_ascii_lowercase()
+                    && key.key_modifiers.contains(&KeyModifier::Shift) =>
+            {
+                BareKey::Char(c.to_ascii_uppercase())
+            }
+            other => other,
+        };
+
         // Any keypress invalidates a stale transient status message.
         self.clear_status();
 
         // Detail mode has its own (smaller) keymap — just scroll + close.
         if matches!(self.mode, PluginMode::Detail) {
-            return self.on_detail_key(key.bare_key);
+            return self.on_detail_key(bare);
         }
 
-        match key.bare_key {
+        match bare {
             BareKey::Enter => {
                 self.open_selected_in_detail_pane();
                 true
