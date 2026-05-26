@@ -695,7 +695,20 @@ impl State {
         debug_log(&format!(
             "open_selected_in_detail_pane: identifier={identifier} url={plugin_url}"
         ));
-        open_plugin_pane_floating(&plugin_url, config, None, BTreeMap::new());
+        // 80% × 80% centered — Zellij's default size for floating plugin
+        // panes is ~half the screen, which is cramped for a Linear issue
+        // with a real description and a comment thread. `PercentOrFixed`
+        // isn't re-exported through `zellij-tile::prelude`, so build the
+        // coords via the string-based constructor.
+        let coords = FloatingPaneCoordinates::new(
+            None,
+            None,
+            Some("80%".to_string()),
+            Some("80%".to_string()),
+            None,
+            None,
+        );
+        open_plugin_pane_floating(&plugin_url, config, coords, BTreeMap::new());
         self.set_status(&format!("Opening {identifier}…"));
     }
 
