@@ -20,6 +20,9 @@ pub struct Issue {
     pub labels: LabelConnection,
     pub url: String,
     pub updated_at: String,
+    /// ISO-8601 timestamp; immutable. Drives the sidebar's display
+    /// order (most recent at the top).
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,6 +133,7 @@ pub struct IssueDetail {
     pub labels: LabelConnection,
     pub url: String,
     pub updated_at: String,
+    pub created_at: String,
     #[serde(default)]
     pub comments: CommentConnection,
 }
@@ -149,6 +153,7 @@ impl IssueDetail {
             labels: self.labels.clone(),
             url: self.url.clone(),
             updated_at: self.updated_at.clone(),
+            created_at: self.created_at.clone(),
         }
     }
 }

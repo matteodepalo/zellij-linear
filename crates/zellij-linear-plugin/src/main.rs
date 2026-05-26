@@ -372,19 +372,25 @@ impl State {
         if full || self.issues.is_empty() {
             self.issues = incoming;
         } else {
-            // Delta: replace matching ids, prepend new ones. Note: this
-            // leaves issues that transitioned *out* of the filter set
-            // (e.g. moved to `completed`) in place until the next full
-            // refresh (every 5th poll).
+            // Delta: replace matching ids, append new ones (resorted below).
+            // Note: this leaves issues that transitioned *out* of the
+            // filter set (e.g. moved to `completed`) in place until the
+            // next full refresh (every 5th poll).
             for inc in incoming {
                 if let Some(slot) = self.issues.iter_mut().find(|i| i.id == inc.id) {
                     *slot = inc;
                 } else {
-                    self.issues.insert(0, inc);
+                    self.issues.push(inc);
                 }
             }
         }
-        // Keep the cursor in range; record the newest updatedAt.
+        // Display order is createdAt descending — most recently created
+        // issues at the top. ISO-8601 strings compare lexicographically,
+        // so a plain reverse-sort works without parsing dates.
+        self.issues
+            .sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        // Keep the cursor in range; record the newest updatedAt for the
+        // delta-poll cursor (separate from display order).
         if self.selected_idx >= self.issues.len() {
             self.selected_idx = self.issues.len().saturating_sub(1);
         }
@@ -662,7 +668,12 @@ impl State {
                     let issue = detail.as_summary();
                     self.send_issue(&issue, true);
                 }
-                true
+                // Auto-submit means the user committed to working on the
+                // issue — bring the work pane forward by dismissing the
+                // detail overlay. Mirrors `q`/`Esc` (returns false because
+                // there's nothing more to render before close).
+                close_self();
+                false
             }
             BareKey::Char('y') => {
                 if let Some(detail) = self.detail_issue.as_ref() {
@@ -812,6 +823,9 @@ mod tests {
             labels: LabelConnection::default(),
             url: format!("https://linear.app/x/{ident}"),
             updated_at: updated_at.into(),
+            // Tests don't exercise createdAt ordering — pick a value
+            // that keeps the merge tests deterministic.
+            created_at: updated_at.into(),
         }
     }
 

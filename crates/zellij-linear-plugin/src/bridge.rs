@@ -121,6 +121,7 @@ mod tests {
             },
             url: "https://linear.app/x/issue/ENG-1".into(),
             updated_at: "2026-05-22T00:00:00Z".into(),
+            created_at: "2026-05-22T00:00:00Z".into(),
         }
     }
 

@@ -24,6 +24,7 @@ query ViewerIssues($filter: IssueFilter, $first: Int = 50) {
         priority
         url
         updatedAt
+        createdAt
         state { name type color }
         labels { nodes { name color } }
       }
@@ -65,6 +66,7 @@ query IssueDetail($id: String!) {
     priority
     url
     updatedAt
+    createdAt
     state { name type color }
     labels { nodes { name color } }
     comments(first: 50, orderBy: createdAt) {

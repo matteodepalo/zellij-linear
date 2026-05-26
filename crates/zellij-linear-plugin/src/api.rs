@@ -252,7 +252,8 @@ mod tests {
         let body = br##"{
             "data":{"viewer":{"assignedIssues":{"nodes":[{
                 "id":"abc","identifier":"ENG-1","title":"Hi","description":null,
-                "priority":2.0,"url":"https://linear.app/x","updatedAt":"2026-05-22T00:00:00Z",
+                "priority":2.0,"url":"https://linear.app/x",
+                "updatedAt":"2026-05-22T00:00:00Z","createdAt":"2026-05-22T00:00:00Z",
                 "state":{"name":"In Progress","type":"started","color":"#f00"},
                 "labels":{"nodes":[]}
             }]}}}
@@ -274,7 +275,8 @@ mod tests {
         let body = br##"{
             "data":{"issues":{"nodes":[{
                 "id":"xyz","identifier":"MAT-30","title":"Consolidate","description":null,
-                "priority":0.0,"url":"https://linear.app/x","updatedAt":"2026-03-31T08:42:08Z",
+                "priority":0.0,"url":"https://linear.app/x",
+                "updatedAt":"2026-03-31T08:42:08Z","createdAt":"2026-03-31T08:42:08Z",
                 "state":{"name":"Backlog","type":"backlog","color":"#aaa"},
                 "labels":{"nodes":[]}
             }]}}
