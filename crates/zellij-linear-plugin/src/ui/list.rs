@@ -7,7 +7,7 @@ use crate::ui::text::truncate;
 
 const KEY_HINT: &str = "[c] claude  [r] refresh  [?] help";
 
-pub fn render(state: &State, rows: usize, cols: usize) {
+pub fn render(state: &mut State, rows: usize, cols: usize) {
     let header = build_header(state, cols);
     println!("{header}");
     let sep = "─".repeat(cols.max(1));
@@ -19,6 +19,7 @@ pub fn render(state: &State, rows: usize, cols: usize) {
         2
     };
     let body_rows = rows.saturating_sub(2 + footer_rows).max(1);
+    state.list_body_rows = body_rows;
 
     if !state.permissions_granted {
         println!("Awaiting permissions…");
@@ -67,8 +68,9 @@ pub fn render(state: &State, rows: usize, cols: usize) {
     println!("{}", truncate(KEY_HINT, cols));
 }
 
-fn render_issue_rows(state: &State, cols: usize, body_rows: usize) {
+fn render_issue_rows(state: &mut State, cols: usize, body_rows: usize) {
     let offset = viewport_offset(state.selected_idx, state.issues.len(), body_rows);
+    state.list_viewport_offset = offset;
     let visible = state.issues.iter().enumerate().skip(offset).take(body_rows);
     for (idx, issue) in visible {
         let selected = idx == state.selected_idx;

@@ -17,7 +17,10 @@ use crate::api::{
 };
 use crate::bridge::{render_prompt, send_or_copy, SendOutcome, DEFAULT_PROMPT_TEMPLATE};
 use linear_client::types::Issue;
-use crate::state::{PluginMode, State, View, LOADING_HOLD_MS, MAX_CONSECUTIVE_AUTH_FAILURES};
+use crate::state::{
+    PluginMode, State, View, LIST_FIRST_ISSUE_LINE, LOADING_HOLD_MS,
+    MAX_CONSECUTIVE_AUTH_FAILURES,
+};
 use crate::util::{debug_log, iso8601_now, set_debug};
 
 register_plugin!(State);
@@ -37,6 +40,7 @@ const REQUIRED_PERMISSIONS: &[PermissionType] = &[
 
 const SUBSCRIBED_EVENTS: &[EventType] = &[
     EventType::Key,
+    EventType::Mouse,
     EventType::PaneUpdate,
     EventType::WebRequestResult,
     EventType::RunCommandResult,
@@ -99,6 +103,7 @@ impl ZellijPlugin for State {
         match event {
             Event::PermissionRequestResult(status) => self.on_permissions(status),
             Event::Key(key) => self.on_key(key),
+            Event::Mouse(mouse) => self.on_mouse(mouse),
             Event::PaneUpdate(manifest) => self.on_panes(manifest),
             Event::WebRequestResult(status, _headers, body, context) => {
                 self.on_web(status, body, context)
@@ -518,6 +523,60 @@ impl State {
                     hide_self();
                     false
                 }
+            }
+            _ => false,
+        }
+    }
+
+    fn on_mouse(&mut self, mouse: Mouse) -> bool {
+        // Same hygiene as keys: any pointer activity invalidates a
+        // transient status message.
+        self.clear_status();
+
+        if matches!(self.mode, PluginMode::Detail) {
+            return match mouse {
+                Mouse::ScrollUp(_) => {
+                    self.scroll_detail_by(-1);
+                    true
+                }
+                Mouse::ScrollDown(_) => {
+                    self.scroll_detail_by(1);
+                    true
+                }
+                _ => false,
+            };
+        }
+
+        match mouse {
+            Mouse::ScrollUp(_) => {
+                self.move_selection(-1);
+                true
+            }
+            Mouse::ScrollDown(_) => {
+                self.move_selection(1);
+                true
+            }
+            Mouse::LeftClick(line, _col) => {
+                // `line` is `isize` — Zellij can report negatives for
+                // clicks above the pane origin, so guard before casting.
+                if line < 0 {
+                    return false;
+                }
+                let l = line as usize;
+                if l < LIST_FIRST_ISSUE_LINE {
+                    return false;
+                }
+                let row = l - LIST_FIRST_ISSUE_LINE;
+                if row >= self.list_body_rows {
+                    return false;
+                }
+                let idx = self.list_viewport_offset + row;
+                if idx >= self.issues.len() {
+                    return false;
+                }
+                self.selected_idx = idx;
+                self.open_selected_in_detail_pane();
+                true
             }
             _ => false,
         }

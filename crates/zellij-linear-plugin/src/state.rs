@@ -88,7 +88,19 @@ pub struct State {
     /// Cached during `detail::render` so the key handler in `main.rs`
     /// can clamp scroll-down moves without re-doing the line wrap.
     pub detail_max_scroll: usize,
+
+    /// First on-screen index of [`issues`] in the list view, written by
+    /// `ui::list::render` so a mouse click at line N can be translated
+    /// back to a logical issue.
+    pub list_viewport_offset: usize,
+    /// Number of issue rows visible in the list view (height of the
+    /// click target zone).
+    pub list_body_rows: usize,
 }
+
+/// Y-coordinate of the first issue row in the list view (after the
+/// title line and separator).
+pub const LIST_FIRST_ISSUE_LINE: usize = 2;
 
 pub const MAX_CONSECUTIVE_AUTH_FAILURES: u32 = 2;
 

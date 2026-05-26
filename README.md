@@ -239,8 +239,8 @@ Inside the floating detail pane:
 
 | Key                    | Action                              |
 | ---------------------- | ----------------------------------- |
-| `j` / ↓                | scroll down one line                |
-| `k` / ↑                | scroll up one line                  |
+| `j` / ↓ / wheel-down   | scroll down one line                |
+| `k` / ↑ / wheel-up     | scroll up one line                  |
 | `Space` / `PgDn`       | scroll down a page                  |
 | `PgUp`                 | scroll up a page                    |
 | `g`                    | jump to top                         |
@@ -251,6 +251,10 @@ Inside the floating detail pane:
 | `Y`                    | copy formatted prompt               |
 | `o`                    | open issue in browser               |
 | `q` / `Esc`            | close the detail pane               |
+
+In the list view, **clicking an issue row** selects it and opens the
+detail pane (same as `Enter`); the scroll wheel also moves the
+selection up/down.
 
 ### CLI reference
 
