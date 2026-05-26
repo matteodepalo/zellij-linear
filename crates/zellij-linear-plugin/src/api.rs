@@ -6,8 +6,8 @@
 
 use std::collections::BTreeMap;
 
-use linear_client::queries::{Q_PROJECT_ISSUES, Q_VIEWER_ISSUES};
-use linear_client::types::{GraphQLResponse, Issue, IssuesPayload};
+use linear_client::queries::{Q_ISSUE_DETAIL, Q_PROJECT_ISSUES, Q_VIEWER_ISSUES};
+use linear_client::types::{GraphQLResponse, Issue, IssueDetail, IssueDetailRoot, IssuesPayload};
 use linear_client::LINEAR_GRAPHQL;
 use serde_json::{json, Value};
 use zellij_tile::prelude::{web_request, HttpVerb};
@@ -16,6 +16,8 @@ use crate::config::AssigneeFilter;
 
 /// Tag attached to Linear issue polling requests.
 pub const KIND_FETCH_ISSUES: &str = "fetch_issues";
+/// Tag attached to the single-issue detail fetch (floating pane).
+pub const KIND_FETCH_DETAIL: &str = "fetch_detail";
 /// Tag attached to the initial token shellout.
 pub const KIND_GET_TOKEN: &str = "get_token";
 /// Tag attached to the token re-fetch after a 401.
@@ -95,6 +97,68 @@ fn build_issue_filter(
         filter.insert("updatedAt".into(), json!({ "gt": s }));
     }
     Value::Object(filter)
+}
+
+pub fn fetch_issue_detail(access_token: &str, issue_id: &str, req_id: &str) {
+    let body = json!({
+        "query": Q_ISSUE_DETAIL,
+        "variables": { "id": issue_id },
+    });
+    let body_bytes = serde_json::to_vec(&body).unwrap_or_default();
+
+    let mut headers = BTreeMap::new();
+    headers.insert(
+        "Authorization".to_string(),
+        format!("Bearer {access_token}"),
+    );
+    headers.insert("Content-Type".to_string(), "application/json".to_string());
+
+    let mut context = BTreeMap::new();
+    context.insert(ctx::KIND.to_string(), KIND_FETCH_DETAIL.to_string());
+    context.insert(ctx::REQ_ID.to_string(), req_id.to_string());
+
+    web_request(LINEAR_GRAPHQL, HttpVerb::Post, headers, body_bytes, context);
+}
+
+pub enum ParsedDetail {
+    Ok(IssueDetail),
+    /// `issue` was null in the response — likely a bad identifier.
+    NotFound,
+    /// 401 — caller should refresh the token and retry.
+    Unauthorized,
+    Error(String),
+}
+
+pub fn parse_detail_response(status: u16, body: &[u8]) -> ParsedDetail {
+    if status == 401 {
+        return ParsedDetail::Unauthorized;
+    }
+    if !(200..300).contains(&status) {
+        let snippet = std::str::from_utf8(body)
+            .unwrap_or("")
+            .chars()
+            .take(200)
+            .collect::<String>();
+        return ParsedDetail::Error(format!("HTTP {status}: {snippet}"));
+    }
+    let parsed: GraphQLResponse<IssueDetailRoot> = match serde_json::from_slice(body) {
+        Ok(p) => p,
+        Err(e) => return ParsedDetail::Error(format!("parse error: {e}")),
+    };
+    if !parsed.errors.is_empty() {
+        return ParsedDetail::Error(
+            parsed
+                .errors
+                .iter()
+                .map(|e| e.message.clone())
+                .collect::<Vec<_>>()
+                .join("; "),
+        );
+    }
+    match parsed.data.and_then(|d| d.issue) {
+        Some(issue) => ParsedDetail::Ok(issue),
+        None => ParsedDetail::NotFound,
+    }
 }
 
 pub enum ParsedIssues {

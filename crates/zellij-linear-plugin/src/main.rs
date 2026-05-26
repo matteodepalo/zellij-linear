@@ -11,11 +11,13 @@ mod ui;
 mod util;
 
 use crate::api::{
-    ctx, fetch_assigned_issues, parse_issue_response, FetchOptions, ParsedIssues,
-    KIND_FETCH_ISSUES, KIND_GET_TOKEN, KIND_OPEN_URL, KIND_REFRESH_TOKEN,
+    ctx, fetch_assigned_issues, fetch_issue_detail, parse_detail_response, parse_issue_response,
+    FetchOptions, ParsedDetail, ParsedIssues, KIND_FETCH_DETAIL, KIND_FETCH_ISSUES,
+    KIND_GET_TOKEN, KIND_OPEN_URL, KIND_REFRESH_TOKEN,
 };
 use crate::bridge::{render_prompt, send_or_copy, SendOutcome, DEFAULT_PROMPT_TEMPLATE};
-use crate::state::{State, View, LOADING_HOLD_MS, MAX_CONSECUTIVE_AUTH_FAILURES};
+use linear_client::types::Issue;
+use crate::state::{PluginMode, State, View, LOADING_HOLD_MS, MAX_CONSECUTIVE_AUTH_FAILURES};
 use crate::util::{debug_log, iso8601_now, set_debug};
 
 register_plugin!(State);
@@ -27,6 +29,10 @@ const REQUIRED_PERMISSIONS: &[PermissionType] = &[
     PermissionType::WriteToStdin,
     PermissionType::WriteToClipboard,
     PermissionType::RunCommands,
+    // open_plugin_pane_floating dispatches under this gate; without it
+    // the host drops the command silently and the shim panics on the
+    // empty stdin response.
+    PermissionType::OpenTerminalsOrPlugins,
 ];
 
 const SUBSCRIBED_EVENTS: &[EventType] = &[
@@ -46,6 +52,18 @@ impl ZellijPlugin for State {
             set_debug(true);
         }
         debug_log("load: entered");
+
+        // Detail mode is opt-in via plugin_config from the spawning
+        // call to `open_plugin_pane_floating`. List mode is the default.
+        if configuration.get("mode").map(String::as_str) == Some("detail") {
+            self.mode = PluginMode::Detail;
+            self.detail_issue_id = configuration.get("issue_id").cloned();
+            debug_log(&format!(
+                "load: detail mode, issue_id={:?}",
+                self.detail_issue_id
+            ));
+        }
+
         self.plugin_config = configuration;
         self.loading_hold_until = crate::util::now_millis().saturating_add(LOADING_HOLD_MS);
         set_timeout((LOADING_HOLD_MS as f64 / 1000.0) + 0.05);
@@ -175,17 +193,37 @@ impl State {
     }
 
     fn kick_off_initial_fetch_or_retry(&mut self, kind: &str) {
-        // Gate on !is_in_flight so a timer that raced through during the
-        // refresh shellout doesn't get its in-flight request overwritten
-        // (the response would then be dropped as stale).
-        if self.can_fetch() && !self.poll.is_in_flight() {
-            self.dispatch_fetch();
+        match self.mode {
+            PluginMode::Detail => {
+                // Single shot — no polling cadence, no recurring timer.
+                self.dispatch_detail_fetch();
+            }
+            PluginMode::List => {
+                // Gate on !is_in_flight so a timer that raced through during the
+                // refresh shellout doesn't get its in-flight request overwritten
+                // (the response would then be dropped as stale).
+                if self.can_fetch() && !self.poll.is_in_flight() {
+                    self.dispatch_fetch();
+                }
+                if kind == KIND_GET_TOKEN {
+                    self.schedule_next_poll();
+                }
+            }
         }
-        // Only the bootstrap path needs to arm the recurring timer; refresh
-        // happens inside an already-scheduled poll.
-        if kind == KIND_GET_TOKEN {
-            self.schedule_next_poll();
-        }
+    }
+
+    fn dispatch_detail_fetch(&mut self) {
+        let Some(token) = self.access_token.clone() else {
+            return;
+        };
+        let Some(issue_id) = self.detail_issue_id.clone() else {
+            self.last_error =
+                Some("Detail mode launched with no `issue_id` in plugin config.".to_string());
+            return;
+        };
+        let req_id = self.next_req_id();
+        debug_log(&format!("dispatch_detail_fetch: issue_id={issue_id}"));
+        fetch_issue_detail(&token, &issue_id, &req_id);
     }
 
     fn can_fetch(&self) -> bool {
@@ -239,6 +277,9 @@ impl State {
         debug_log(&format!(
             "on_web: kind={kind} status={status} body[0..300]={snippet:?}"
         ));
+        if kind == KIND_FETCH_DETAIL {
+            return self.on_detail_response(status, &body);
+        }
         if kind != KIND_FETCH_ISSUES {
             return false;
         }
@@ -291,6 +332,37 @@ impl State {
         true
     }
 
+    fn on_detail_response(&mut self, status: u16, body: &[u8]) -> bool {
+        match parse_detail_response(status, body) {
+            ParsedDetail::Ok(issue) => {
+                self.detail_issue = Some(issue);
+                self.initial_load_done = true;
+                self.last_error = None;
+                self.consecutive_auth_failures = 0;
+            }
+            ParsedDetail::NotFound => {
+                self.last_error = Some("Issue not found.".to_string());
+                self.initial_load_done = true;
+            }
+            ParsedDetail::Unauthorized => {
+                self.consecutive_auth_failures = self.consecutive_auth_failures.saturating_add(1);
+                if self.consecutive_auth_failures > MAX_CONSECUTIVE_AUTH_FAILURES {
+                    self.last_error = Some(
+                        "Authentication failed. Run `zellij-linear login` again.".to_string(),
+                    );
+                } else {
+                    self.last_error = Some("401 — refreshing token…".to_string());
+                    self.fetch_token(KIND_REFRESH_TOKEN);
+                }
+            }
+            ParsedDetail::Error(msg) => {
+                self.last_error = Some(msg);
+                self.initial_load_done = true;
+            }
+        }
+        true
+    }
+
     fn merge_issues(&mut self, incoming: Vec<linear_client::types::Issue>, full: bool) {
         if full || self.issues.is_empty() {
             self.issues = incoming;
@@ -318,7 +390,10 @@ impl State {
 
     fn on_timer(&mut self) -> bool {
         self.prune_expired_status();
-        // Stale in-flight request? Clear it so we can retry.
+        // Detail mode is a one-shot fetch; no recurring polls.
+        if matches!(self.mode, PluginMode::Detail) {
+            return true;
+        }
         if self.poll.in_flight_timed_out() {
             self.poll.clear_in_flight();
         }
@@ -355,7 +430,16 @@ impl State {
         // Any keypress invalidates a stale transient status message.
         self.clear_status();
 
+        // Detail mode has its own (smaller) keymap — just scroll + close.
+        if matches!(self.mode, PluginMode::Detail) {
+            return self.on_detail_key(key.bare_key);
+        }
+
         match key.bare_key {
+            BareKey::Enter => {
+                self.open_selected_in_detail_pane();
+                true
+            }
             BareKey::Char('j') | BareKey::Down => {
                 self.move_selection(1);
                 true
@@ -391,23 +475,14 @@ impl State {
                 true
             }
             BareKey::Char('y') => {
-                if let Some(issue) = self.selected_issue() {
-                    let body = issue.description.clone().unwrap_or_default();
-                    copy_to_clipboard(body);
-                    self.set_status("Copied issue body");
+                if let Some(issue) = self.selected_issue().cloned() {
+                    self.copy_issue_body(&issue);
                 }
                 true
             }
             BareKey::Char('Y') => {
-                if let Some(issue) = self.selected_issue() {
-                    let template = self
-                        .config
-                        .as_ref()
-                        .and_then(|c| c.claude.prompt_template.clone())
-                        .unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string());
-                    let prompt = render_prompt(issue, &template);
-                    copy_to_clipboard(prompt);
-                    self.set_status("Copied formatted prompt");
+                if let Some(issue) = self.selected_issue().cloned() {
+                    self.copy_issue_prompt(&issue);
                 }
                 true
             }
@@ -448,6 +523,123 @@ impl State {
         }
     }
 
+    fn scroll_detail_by(&mut self, delta: isize) {
+        if delta >= 0 {
+            let by = delta as usize;
+            self.detail_scroll = self
+                .detail_scroll
+                .saturating_add(by)
+                .min(self.detail_max_scroll);
+        } else {
+            let by = delta.unsigned_abs();
+            self.detail_scroll = self.detail_scroll.saturating_sub(by);
+        }
+    }
+
+    fn on_detail_key(&mut self, key: BareKey) -> bool {
+        match key {
+            BareKey::Char('j') | BareKey::Down => {
+                self.scroll_detail_by(1);
+                true
+            }
+            BareKey::Char('k') | BareKey::Up => {
+                self.scroll_detail_by(-1);
+                true
+            }
+            BareKey::Char('g') => {
+                self.detail_scroll = 0;
+                true
+            }
+            BareKey::Char('G') => {
+                self.detail_scroll = self.detail_max_scroll;
+                true
+            }
+            BareKey::PageDown | BareKey::Char(' ') => {
+                self.scroll_detail_by(10);
+                true
+            }
+            BareKey::PageUp => {
+                self.scroll_detail_by(-10);
+                true
+            }
+            BareKey::Char('o') => {
+                if let Some(issue) = self.detail_issue.as_ref() {
+                    let mut cmd_ctx = BTreeMap::new();
+                    cmd_ctx.insert(ctx::KIND.to_string(), KIND_OPEN_URL.to_string());
+                    let opener = if cfg!(target_os = "macos") {
+                        "open"
+                    } else {
+                        "xdg-open"
+                    };
+                    run_command(&[opener, &issue.url], cmd_ctx);
+                }
+                true
+            }
+            BareKey::Char('c') => {
+                if let Some(detail) = self.detail_issue.as_ref() {
+                    let issue = detail.as_summary();
+                    self.send_issue(&issue, false);
+                }
+                true
+            }
+            BareKey::Char('C') => {
+                if let Some(detail) = self.detail_issue.as_ref() {
+                    let issue = detail.as_summary();
+                    self.send_issue(&issue, true);
+                }
+                true
+            }
+            BareKey::Char('y') => {
+                if let Some(detail) = self.detail_issue.as_ref() {
+                    let issue = detail.as_summary();
+                    self.copy_issue_body(&issue);
+                }
+                true
+            }
+            BareKey::Char('Y') => {
+                if let Some(detail) = self.detail_issue.as_ref() {
+                    let issue = detail.as_summary();
+                    self.copy_issue_prompt(&issue);
+                }
+                true
+            }
+            BareKey::Char('q') | BareKey::Esc => {
+                close_self();
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn open_selected_in_detail_pane(&mut self) {
+        let Some(issue) = self.selected_issue() else {
+            return;
+        };
+        let identifier = issue.identifier.clone();
+        let mut config = BTreeMap::new();
+        config.insert("mode".to_string(), "detail".to_string());
+        config.insert("issue_id".to_string(), identifier.clone());
+        // Carry the debug flag through so the spawned instance logs to
+        // the same file if the user has it enabled.
+        if crate::util::debug_enabled() {
+            config.insert("debug".to_string(), "true".to_string());
+        }
+        let plugin_url = self
+            .plugin_config
+            .get("file_path")
+            .cloned()
+            .unwrap_or_else(|| {
+                // The sidebar instance was loaded via this URL form; we
+                // re-use the same one for the floating instance.
+                "file:~/.config/zellij/plugins/zellij-linear.wasm".to_string()
+            });
+        debug_log(&format!(
+            "open_selected_in_detail_pane: identifier={identifier} url={plugin_url}"
+        ));
+        open_plugin_pane_floating(&plugin_url, config, None, BTreeMap::new());
+        self.set_status(&format!("Opening {identifier}…"));
+    }
+
     #[cfg(test)]
     pub(crate) fn merge_issues_for_test(
         &mut self,
@@ -461,6 +653,10 @@ impl State {
         let Some(issue) = self.selected_issue().cloned() else {
             return;
         };
+        self.send_issue(&issue, auto_submit_override);
+    }
+
+    fn send_issue(&mut self, issue: &Issue, auto_submit_override: bool) {
         let cfg = self.config.clone();
         let template = cfg
             .as_ref()
@@ -475,7 +671,7 @@ impl State {
             .as_ref()
             .map(|c| c.target_command().to_string())
             .unwrap_or_else(|| "claude".to_string());
-        let prompt = render_prompt(&issue, &template);
+        let prompt = render_prompt(issue, &template);
         match send_or_copy(&self.panes, &target, prompt, auto_submit) {
             SendOutcome::Sent => {
                 self.set_status(&format!("Sent {} to Claude", issue.identifier));
@@ -488,6 +684,23 @@ impl State {
                 ));
             }
         }
+    }
+
+    fn copy_issue_body(&mut self, issue: &Issue) {
+        let body = issue.description.clone().unwrap_or_default();
+        copy_to_clipboard(body);
+        self.set_status("Copied issue body");
+    }
+
+    fn copy_issue_prompt(&mut self, issue: &Issue) {
+        let template = self
+            .config
+            .as_ref()
+            .and_then(|c| c.claude.prompt_template.clone())
+            .unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string());
+        let prompt = render_prompt(issue, &template);
+        copy_to_clipboard(prompt);
+        self.set_status("Copied formatted prompt");
     }
 }
 

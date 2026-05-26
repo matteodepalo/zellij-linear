@@ -196,6 +196,7 @@ appears invisible. Two workarounds:
        ChangeApplicationState
        WriteToStdin
        WriteToClipboard
+       OpenTerminalsOrPlugins
    }
    EOF
    ```
@@ -212,6 +213,7 @@ without each one, the listed feature stops working:
 | `WriteToStdin`            | the actual paste — `write_chars_to_pane_id` into the Claude pane                 |
 | `WriteToClipboard`        | clipboard fallback when no Claude pane is found, plus `y` / `Y` keybinds         |
 | `RunCommands`             | `zellij-linear token` (auth refresh) and `open` / `xdg-open` for `o` (open URL)  |
+| `OpenTerminalsOrPlugins`  | spawn the floating issue-detail pane (`Enter` on a list item)                    |
 
 ## Daily use
 
@@ -219,6 +221,7 @@ without each one, the listed feature stops working:
 
 | Key      | Action                              |
 | -------- | ----------------------------------- |
+| `Enter`  | open issue in floating detail pane  |
 | `j` / ↓  | next issue                          |
 | `k` / ↑  | previous issue                      |
 | `g`      | jump to top                         |
@@ -231,6 +234,23 @@ without each one, the listed feature stops working:
 | `o`      | open in browser                     |
 | `?`      | help overlay                        |
 | `Esc`    | back / hide plugin                  |
+
+Inside the floating detail pane:
+
+| Key                    | Action                              |
+| ---------------------- | ----------------------------------- |
+| `j` / ↓                | scroll down one line                |
+| `k` / ↑                | scroll up one line                  |
+| `Space` / `PgDn`       | scroll down a page                  |
+| `PgUp`                 | scroll up a page                    |
+| `g`                    | jump to top                         |
+| `G`                    | jump to bottom                      |
+| `c`                    | send to Claude (paste only)         |
+| `C`                    | send to Claude + auto-submit        |
+| `y`                    | copy issue description              |
+| `Y`                    | copy formatted prompt               |
+| `o`                    | open issue in browser               |
+| `q` / `Esc`            | close the detail pane               |
 
 ### CLI reference
 

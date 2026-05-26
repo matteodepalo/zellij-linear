@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use linear_client::types::Issue;
+use linear_client::types::{Issue, IssueDetail};
 use zellij_tile::prelude::PaneInfo;
 
 use crate::config::ProjectConfig;
@@ -70,6 +70,24 @@ pub struct State {
     /// 401 and bump `consecutive_auth_failures` a second time off a
     /// single underlying credential failure).
     pub auth_refresh_pending: bool,
+
+    /// Set in `load()` based on `plugin_config["mode"]`. Drives whether
+    /// this instance polls Linear for the sidebar list or fetches a
+    /// single issue for the floating detail view.
+    pub mode: PluginMode,
+    /// In [`PluginMode::Detail`] this is the Linear identifier
+    /// (e.g. `MAT-30`) passed in via `plugin_config["issue_id"]`.
+    pub detail_issue_id: Option<String>,
+    /// The fetched issue detail, populated once the `KIND_FETCH_DETAIL`
+    /// request returns. None until then.
+    pub detail_issue: Option<IssueDetail>,
+    /// Top line of the detail-view viewport. Capped to `detail_max_scroll`
+    /// each render so over-scrolling past the bottom doesn't strand the
+    /// counter (after which `k` takes N presses to "catch up").
+    pub detail_scroll: usize,
+    /// Cached during `detail::render` so the key handler in `main.rs`
+    /// can clamp scroll-down moves without re-doing the line wrap.
+    pub detail_max_scroll: usize,
 }
 
 pub const MAX_CONSECUTIVE_AUTH_FAILURES: u32 = 2;
@@ -79,6 +97,16 @@ pub enum View {
     #[default]
     List,
     Help,
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PluginMode {
+    /// The sidebar list (default — used when no `mode` is in plugin_config).
+    #[default]
+    List,
+    /// A one-shot floating detail view for a single issue. Set by
+    /// `open_plugin_pane_floating` with `mode = "detail"`.
+    Detail,
 }
 
 impl State {

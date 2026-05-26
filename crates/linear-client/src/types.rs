@@ -114,6 +114,73 @@ pub struct Viewer {
     pub email: String,
 }
 
+/// `Q_ISSUE_DETAIL` returns the issue with its comment thread attached.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueDetail {
+    pub id: String,
+    pub identifier: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub priority: f64,
+    pub state: IssueState,
+    #[serde(default)]
+    pub labels: LabelConnection,
+    pub url: String,
+    pub updated_at: String,
+    #[serde(default)]
+    pub comments: CommentConnection,
+}
+
+impl IssueDetail {
+    /// Drop the comment thread and return the list-row shape, so the
+    /// send-to-Claude bridge can reuse `render_prompt` from the detail
+    /// view without taking a second code path.
+    pub fn as_summary(&self) -> Issue {
+        Issue {
+            id: self.id.clone(),
+            identifier: self.identifier.clone(),
+            title: self.title.clone(),
+            description: self.description.clone(),
+            priority: self.priority,
+            state: self.state.clone(),
+            labels: self.labels.clone(),
+            url: self.url.clone(),
+            updated_at: self.updated_at.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct CommentConnection {
+    #[serde(default)]
+    pub nodes: Vec<Comment>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Comment {
+    pub body: String,
+    pub created_at: String,
+    #[serde(default)]
+    pub user: Option<CommentAuthor>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CommentAuthor {
+    pub name: String,
+    #[serde(default)]
+    pub email: Option<String>,
+}
+
+/// `{ issue: { ... } }` — shape returned by [`Q_ISSUE_DETAIL`](crate::queries::Q_ISSUE_DETAIL).
+#[derive(Debug, Clone, Deserialize)]
+pub struct IssueDetailRoot {
+    pub issue: Option<IssueDetail>,
+}
+
 /// `viewer { assignedIssues { nodes [...] } }`
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

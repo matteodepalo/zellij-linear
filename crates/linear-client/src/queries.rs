@@ -53,6 +53,31 @@ query ProjectIssues($filter: IssueFilter, $first: Int = 50) {
 }
 "#;
 
+/// Single issue with comments — used by the floating detail pane.
+/// `$id` accepts either the UUID or the human identifier (e.g. `MAT-30`).
+pub const Q_ISSUE_DETAIL: &str = r#"
+query IssueDetail($id: String!) {
+  issue(id: $id) {
+    id
+    identifier
+    title
+    description
+    priority
+    url
+    updatedAt
+    state { name type color }
+    labels { nodes { name color } }
+    comments(first: 50, orderBy: createdAt) {
+      nodes {
+        body
+        createdAt
+        user { name email }
+      }
+    }
+  }
+}
+"#;
+
 /// Projects the viewer can see. Used by `zellij-linear init` to let
 /// the user pick a project without leaving the terminal.
 pub const Q_PROJECTS: &str = r#"
